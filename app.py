@@ -11,8 +11,6 @@ import PyPDF2
 import google.generativeai as genai
 import os
 import pandas as pd
-import plotly.express as px
-import plotly.graph_objects as go
 
 # ==================== CẤU HÌNH ====================
 st.set_page_config(
@@ -58,12 +56,12 @@ st.markdown("""
         margin: 10px 0;
         border-left: 5px solid #2196F3;
     }
-    .search-card {
-        background-color: #f1f8e9;
+    .warning-card {
+        background-color: #fff3cd;
         padding: 20px;
         border-radius: 10px;
         margin: 10px 0;
-        border-left: 5px solid #8BC34A;
+        border-left: 5px solid #ffc107;
     }
     .stButton > button {
         width: 100%;
@@ -80,27 +78,15 @@ st.markdown("""
         transform: translateY(-2px);
         box-shadow: 0 4px 8px rgba(0,0,0,0.1);
     }
+    .required-field::after {
+        content: " *";
+        color: red;
+    }
     .rank-1 { background-color: #FFD700 !important; color: black; }
     .rank-2 { background-color: #C0C0C0 !important; color: black; }
     .rank-3 { background-color: #CD7F32 !important; color: white; }
-    .answer-selected {
-        background-color: #d1e7ff !important;
-        border: 2px solid #0d6efd !important;
-    }
-    .info-box {
-        background-color: #fff3cd;
-        padding: 15px;
-        border-radius: 8px;
-        border-left: 5px solid #ffc107;
-        margin: 10px 0;
-    }
-    .success-box {
-        background-color: #d1e7dd;
-        padding: 15px;
-        border-radius: 8px;
-        border-left: 5px solid #198754;
-        margin: 10px 0;
-    }
+    .answer-correct { background-color: #d4edda !important; border-left: 5px solid #28a745 !important; }
+    .answer-wrong { background-color: #f8d7da !important; border-left: 5px solid #dc3545 !important; }
     .badge {
         display: inline-block;
         padding: 5px 10px;
@@ -130,8 +116,8 @@ def migrate_database():
             c.execute('''CREATE TABLE results
                          (id INTEGER PRIMARY KEY AUTOINCREMENT,
                           quiz_code TEXT,
-                          student_name TEXT,
-                          class_name TEXT DEFAULT '',
+                          student_name TEXT NOT NULL,
+                          class_name TEXT NOT NULL,
                           student_id TEXT DEFAULT '',
                           score INTEGER,
                           total_questions INTEGER,
@@ -145,7 +131,7 @@ def migrate_database():
             columns = [col[1] for col in c.fetchall()]
             
             columns_to_add = [
-                ('class_name', 'TEXT DEFAULT ""'),
+                ('class_name', 'TEXT NOT NULL DEFAULT ""'),
                 ('student_id', 'TEXT DEFAULT ""'),
                 ('percentage', 'REAL DEFAULT 0'),
                 ('grade', 'TEXT DEFAULT ""')
@@ -166,8 +152,8 @@ def migrate_database():
             c.execute('''CREATE TABLE results
                          (id INTEGER PRIMARY KEY AUTOINCREMENT,
                           quiz_code TEXT,
-                          student_name TEXT,
-                          class_name TEXT DEFAULT '',
+                          student_name TEXT NOT NULL,
+                          class_name TEXT NOT NULL,
                           student_id TEXT DEFAULT '',
                           score INTEGER,
                           total_questions INTEGER,
@@ -214,8 +200,8 @@ def init_db():
     # Bảng students (lưu thông tin học sinh)
     c.execute('''CREATE TABLE IF NOT EXISTS students
                  (id INTEGER PRIMARY KEY AUTOINCREMENT,
-                  student_name TEXT,
-                  class_name TEXT,
+                  student_name TEXT NOT NULL,
+                  class_name TEXT NOT NULL,
                   student_id TEXT UNIQUE,
                   email TEXT,
                   phone TEXT,
@@ -481,24 +467,58 @@ def calculate_grade(percentage):
     else:
         return "F", "🔄 Cần cố gắng hơn", "#F44336"
 
-def register_student(student_name, class_name, student_id="", email="", phone=""):
-    """Đăng ký thông tin học sinh"""
-    conn = sqlite3.connect('quiz_system.db')
-    c = conn.cursor()
+def validate_student_info(student_name, class_name):
+    """Kiểm tra thông tin học sinh"""
+    errors = []
     
+    # Kiểm tra tên không rỗng
+    if not student_name or len(student_name.strip()) < 3:
+        errors.append("❌ **Họ tên quá ngắn!** Vui lòng nhập đầy đủ họ và tên (ít nhất 3 ký tự).")
+    
+    # Kiểm tra lớp không rỗng
+    if not class_name or len(class_name.strip()) < 2:
+        errors.append("❌ **Tên lớp không hợp lệ!** Vui lòng nhập tên lớp (ví dụ: 10A1, 11B2).")
+    
+    # Kiểm tra định dạng tên (có ít nhất 2 từ)
+    name_parts = student_name.strip().split()
+    if len(name_parts) < 2:
+        errors.append("❌ **Vui lòng nhập cả họ và tên** (ví dụ: Nguyễn Văn A, Trần Thị B).")
+    
+    # Kiểm tra tên không chứa ký tự đặc biệt
+    if re.search(r'[!@#$%^&*()_+={}\[\]:;"\'<>,.?/~`|\\]', student_name):
+        errors.append("❌ **Tên không được chứa ký tự đặc biệt!**")
+    
+    return errors
+
+def get_distinct_classes():
+    """Lấy danh sách lớp duy nhất từ database"""
     try:
-        c.execute('''INSERT OR REPLACE INTO students 
-                     (student_name, class_name, student_id, email, phone, created_at)
-                     VALUES (?, ?, ?, ?, ?, ?)''',
-                 (student_name, class_name, student_id, email, phone, datetime.now()))
-        conn.commit()
-        student_db_id = c.lastrowid
+        conn = sqlite3.connect('quiz_system.db')
+        c = conn.cursor()
+        c.execute("SELECT DISTINCT class_name FROM results WHERE class_name != '' ORDER BY class_name")
+        classes = [row[0] for row in c.fetchall()]
         conn.close()
-        return student_db_id
-    except Exception as e:
-        print(f"❌ Lỗi đăng ký học sinh: {e}")
+        return classes
+    except:
+        return []
+
+def get_students_by_class(class_name):
+    """Lấy danh sách học sinh theo lớp"""
+    try:
+        conn = sqlite3.connect('quiz_system.db')
+        conn.row_factory = sqlite3.Row
+        c = conn.cursor()
+        c.execute('''
+            SELECT DISTINCT student_name, class_name, student_id 
+            FROM results 
+            WHERE class_name = ? 
+            ORDER BY student_name
+        ''', (class_name,))
+        students = c.fetchall()
         conn.close()
-        return None
+        return students
+    except:
+        return []
 
 # ==================== GIAO DIỆN CHÍNH HOÀN CHỈNH ====================
 def main():
@@ -511,7 +531,6 @@ def main():
         
         menu_options = [
             "🏠 TRANG CHỦ",
-            "👨‍🎓 ĐĂNG KÝ HỌC SINH", 
             "📤 TẠO QUIZ MỚI",
             "🎯 THAM GIA QUIZ",
             "🔍 TRA CỨU KẾT QUẢ",
@@ -548,12 +567,16 @@ def main():
             c.execute("SELECT COUNT(*) FROM results")
             test_count = c.fetchone()[0]
             
+            c.execute("SELECT COUNT(DISTINCT class_name) FROM results WHERE class_name != ''")
+            class_count = c.fetchone()[0]
+            
             conn.close()
             
             st.info(f"""
             **📊 THỐNG KÊ NHANH:**
             - 📝 **Quiz:** {quiz_count}
             - 👨‍🎓 **Học sinh:** {student_count}
+            - 🏫 **Lớp học:** {class_count}
             - 📋 **Bài thi:** {test_count}
             """)
         except:
@@ -572,30 +595,38 @@ def main():
             st.markdown("""
             ### ✨ **TÍNH NĂNG NỔI BẬT:**
             
-            **👨‍🎓 QUẢN LÝ HỌC SINH TOÀN DIỆN:**
-            - Đăng ký thông tin học sinh chi tiết
-            - Quản lý theo lớp, theo mã học sinh
-            - Lưu trữ lịch sử bài thi đầy đủ
-            
             **📚 TẠO QUIZ THÔNG MINH:**
             - 🤖 AI tự động tạo câu hỏi từ giáo án
             - 📤 Hỗ trợ đa định dạng: TXT, PDF, DOCX
             - 🎯 Tùy chỉnh số câu hỏi, độ khó
             
-            **📊 THỐNG KÊ CHI TIẾT:**
-            - Báo cáo theo lớp, theo học sinh
-            - Biểu đồ tiến bộ học tập
-            - Xếp hạng toàn trường & theo lớp
+            **🎯 THAM GIA QUIZ:**
+            - 👨‍🎓 **BẮT BUỘC** nhập thông tin học sinh
+            - 🏫 Quản lý theo lớp học chi tiết
+            - 📝 Giao diện thân thiện, dễ sử dụng
+            
+            **📊 THỐNG KÊ ĐẦY ĐỦ:**
+            - 🔍 Tra cứu theo tên học sinh & lớp
+            - 📈 Thống kê điểm số chi tiết
+            - 🏆 Bảng xếp hạng toàn trường
             
             **🔍 TRA CỨU LINH HOẠT:**
             - Tìm kiếm theo tên, lớp, mã quiz
             - Lọc theo điểm số, thời gian
-            - Xuất báo cáo Excel chi tiết
+            - 📥 Xuất báo cáo Excel chi tiết
             
             **📱 TÍCH HỢP ĐA NỀN TẢNG:**
             - Hoạt động trên điện thoại & máy tính
-            - Giao diện thân thiện, dễ sử dụng
-            - Tự động lưu trữ & backup
+            - Tự động lưu trữ & backup dữ liệu
+            - Bảo mật thông tin học sinh
+            """)
+            
+            st.markdown("""
+            ### ⚠️ **QUY ĐỊNH QUAN TRỌNG:**
+            1. **Học sinh BẮT BUỘC nhập đầy đủ họ tên và lớp**
+            2. **Thông tin phải chính xác để tra cứu kết quả**
+            3. **Không nhập thông tin sẽ KHÔNG được nộp bài**
+            4. **Mỗi học sinh chỉ được làm bài 1 lần/quiz**
             """)
         
         with col2:
@@ -603,12 +634,12 @@ def main():
             
             # Card hướng dẫn
             st.markdown("""
-            <div class="info-box">
+            <div class="student-info-card">
                 <h4>📋 HƯỚNG DẪN SỬ DỤNG:</h4>
                 <ol>
-                    <li><strong>Đăng ký học sinh</strong> (bắt buộc)</li>
                     <li><strong>Tạo quiz</strong> từ file giáo án</li>
                     <li><strong>Chia sẻ mã quiz</strong> cho học sinh</li>
+                    <li><strong>Học sinh tham gia</strong> (nhập đủ thông tin)</li>
                     <li><strong>Theo dõi kết quả</strong> real-time</li>
                     <li><strong>Xuất báo cáo</strong> Excel</li>
                 </ol>
@@ -616,16 +647,20 @@ def main():
             """, unsafe_allow_html=True)
             
             # Nút điều hướng nhanh
-            if st.button("👨‍🎓 ĐĂNG KÝ HỌC SINH NGAY", use_container_width=True):
-                st.session_state.menu = "👨‍🎓 ĐĂNG KÝ HỌC SINH"
-                st.rerun()
-            
             if st.button("📤 TẠO QUIZ MỚI", use_container_width=True):
                 st.session_state.menu = "📤 TẠO QUIZ MỚI"
                 st.rerun()
             
+            if st.button("🎯 THAM GIA QUIZ", use_container_width=True):
+                st.session_state.menu = "🎯 THAM GIA QUIZ"
+                st.rerun()
+            
             if st.button("🔍 TRA CỨU KẾT QUẢ", use_container_width=True):
                 st.session_state.menu = "🔍 TRA CỨU KẾT QUẢ"
+                st.rerun()
+            
+            if st.button("📊 THỐNG KÊ", use_container_width=True):
+                st.session_state.menu = "📊 THỐNG KÊ CHI TIẾT"
                 st.rerun()
         
         # Hiển thị quiz mới nhất
@@ -656,151 +691,6 @@ def main():
                 st.info("📭 Chưa có quiz nào được tạo")
         except:
             st.info("📭 Đang tải dữ liệu...")
-    
-    # ==================== ĐĂNG KÝ HỌC SINH ====================
-    elif menu == "👨‍🎓 ĐĂNG KÝ HỌC SINH":
-        st.header("👨‍🎓 ĐĂNG KÝ THÔNG TIN HỌC SINH")
-        
-        tab1, tab2, tab3 = st.tabs(["📝 Đăng ký mới", "📋 Danh sách học sinh", "🔍 Tìm kiếm học sinh"])
-        
-        with tab1:
-            st.markdown("### 📝 NHẬP THÔNG TIN HỌC SINH")
-            
-            col1, col2 = st.columns(2)
-            
-            with col1:
-                student_name = st.text_input(
-                    "**Họ và tên:**",
-                    placeholder="Nguyễn Văn A",
-                    help="Nhập họ tên đầy đủ của học sinh"
-                )
-                
-                class_name = st.text_input(
-                    "**Lớp:**",
-                    placeholder="10A1, 11B2, 12C3...",
-                    help="Nhập tên lớp theo quy định của trường"
-                )
-                
-                student_id = st.text_input(
-                    "**Mã học sinh (nếu có):**",
-                    placeholder="HS001, 2024001...",
-                    help="Mã số học sinh trong sổ điểm"
-                )
-            
-            with col2:
-                email = st.text_input(
-                    "**Email (tùy chọn):**",
-                    placeholder="student@school.edu.vn",
-                    help="Email để nhận thông báo kết quả"
-                )
-                
-                phone = st.text_input(
-                    "**Số điện thoại (tùy chọn):**",
-                    placeholder="0987654321",
-                    help="SĐT liên hệ trong trường hợp cần"
-                )
-            
-            if st.button("✅ ĐĂNG KÝ HỌC SINH", type="primary", use_container_width=True):
-                if student_name and class_name:
-                    student_db_id = register_student(student_name, class_name, student_id, email, phone)
-                    
-                    if student_db_id:
-                        st.success(f"✅ **ĐÃ ĐĂNG KÝ THÀNH CÔNG!**")
-                        
-                        st.markdown(f"""
-                        <div class="success-box">
-                            <h4>📋 THÔNG TIN ĐÃ ĐĂNG KÝ:</h4>
-                            <p><strong>👨‍🎓 Họ tên:</strong> {student_name}</p>
-                            <p><strong>🏫 Lớp:</strong> {class_name}</p>
-                            <p><strong>🆔 Mã HS:</strong> {student_id if student_id else 'Chưa có'}</p>
-                            <p><strong>📧 Email:</strong> {email if email else 'Chưa có'}</p>
-                            <p><strong>📞 SĐT:</strong> {phone if phone else 'Chưa có'}</p>
-                            <p><strong>🆔 ID trong hệ thống:</strong> {student_db_id}</p>
-                        </div>
-                        """, unsafe_allow_html=True)
-                        
-                        # Reset form
-                        st.session_state.student_name = ""
-                        st.session_state.class_name = ""
-                        st.session_state.student_id = ""
-                else:
-                    st.error("❌ **VUI LÒNG NHẬP ĐẦY ĐỦ HỌ TÊN VÀ LỚP!**")
-        
-        with tab2:
-            st.markdown("### 📋 DANH SÁCH HỌC SINH ĐÃ ĐĂNG KÝ")
-            
-            try:
-                conn = sqlite3.connect('quiz_system.db')
-                conn.row_factory = sqlite3.Row
-                c = conn.cursor()
-                
-                # Lọc theo lớp nếu có
-                c.execute("SELECT DISTINCT class_name FROM students ORDER BY class_name")
-                classes = [row[0] for row in c.fetchall()]
-                
-                selected_class = st.selectbox("Chọn lớp để xem:", ["Tất cả"] + classes)
-                
-                if selected_class == "Tất cả":
-                    c.execute('''
-                        SELECT s.*, 
-                               COUNT(r.id) as test_count,
-                               AVG(r.percentage) as avg_score
-                        FROM students s
-                        LEFT JOIN results r ON s.student_name = r.student_name 
-                            AND s.class_name = r.class_name
-                        GROUP BY s.id
-                        ORDER BY s.class_name, s.student_name
-                    ''')
-                else:
-                    c.execute('''
-                        SELECT s.*, 
-                               COUNT(r.id) as test_count,
-                               AVG(r.percentage) as avg_score
-                        FROM students s
-                        LEFT JOIN results r ON s.student_name = r.student_name 
-                            AND s.class_name = r.class_name
-                        WHERE s.class_name = ?
-                        GROUP BY s.id
-                        ORDER BY s.student_name
-                    ''', (selected_class,))
-                
-                students = c.fetchall()
-                conn.close()
-                
-                if students:
-                    st.success(f"✅ Tìm thấy {len(students)} học sinh")
-                    
-                    # Hiển thị dạng bảng
-                    student_data = []
-                    for s in students:
-                        student_data.append({
-                            "ID": s['id'],
-                            "Họ tên": s['student_name'],
-                            "Lớp": s['class_name'],
-                            "Mã HS": s['student_id'] or "",
-                            "Số bài thi": s['test_count'] or 0,
-                            "Điểm TB": f"{s['avg_score']:.1f}%" if s['avg_score'] else "Chưa có"
-                        })
-                    
-                    df = pd.DataFrame(student_data)
-                    st.dataframe(df, use_container_width=True, hide_index=True)
-                    
-                    # Xuất Excel
-                    excel_buffer = io.BytesIO()
-                    df.to_excel(excel_buffer, index=False, engine='openpyxl')
-                    excel_buffer.seek(0)
-                    
-                    st.download_button(
-                        label="📥 Tải danh sách Excel",
-                        data=excel_buffer,
-                        file_name=f"danh_sach_hoc_sinh_{datetime.now().strftime('%Y%m%d')}.xlsx",
-                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                    )
-                else:
-                    st.info("📭 Chưa có học sinh nào đăng ký")
-                    
-            except Exception as e:
-                st.error(f"❌ Lỗi: {str(e)}")
     
     # ==================== TẠO QUIZ MỚI ====================
     elif menu == "📤 TẠO QUIZ MỚI":
@@ -964,6 +854,8 @@ def main():
                 
                 if not quiz:
                     st.error("❌ **MÃ QUIZ KHÔNG TỒN TẠI HOẶC ĐÃ BỊ KHÓA!**")
+                    conn.close()
+                    st.stop()
                 else:
                     st.success(f"✅ **ĐÃ TÌM THẤY QUIZ:** {quiz['title']}")
                     
@@ -974,185 +866,218 @@ def main():
                     
                     if not questions:
                         st.error("❌ **QUIZ NÀY CHƯA CÓ CÂU HỎI!**")
-                    else:
-                        # THÔNG TIN HỌC SINH
-                        st.markdown("### 👨‍🎓 **THÔNG TIN HỌC SINH**")
+                        st.stop()
+                    
+                    # THÔNG TIN HỌC SINH - BẮT BUỘC NHẬP
+                    st.markdown("### 👨‍🎓 **THÔNG TIN HỌC SINH (BẮT BUỘC)**")
+                    
+                    st.markdown("""
+                    <div class="warning-card">
+                        <h4>⚠️ THÔNG TIN BẮT BUỘC</h4>
+                        <p>Vui lòng nhập đầy đủ thông tin để:</p>
+                        <ul>
+                            <li>Xác định kết quả bài thi</li>
+                            <li>Tra cứu kết quả sau này</li>
+                            <li>Xếp hạng chính xác</li>
+                            <li>Nhận chứng chỉ/giấy khen (nếu có)</li>
+                        </ul>
+                    </div>
+                    """, unsafe_allow_html=True)
+                    
+                    col1, col2, col3 = st.columns(3)
+                    
+                    with col1:
+                        student_name = st.text_input(
+                            "**Họ và tên:**",
+                            placeholder="Nguyễn Văn A",
+                            help="Nhập họ tên đầy đủ",
+                            key="take_student_name"
+                        )
+                    
+                    with col2:
+                        class_name = st.text_input(
+                            "**Lớp:**",
+                            placeholder="10A1",
+                            help="Nhập tên lớp",
+                            key="take_class_name"
+                        )
+                    
+                    with col3:
+                        student_id = st.text_input(
+                            "**Mã học sinh (nếu có):**",
+                            placeholder="HS001",
+                            help="Mã số học sinh (không bắt buộc)",
+                            key="take_student_id"
+                        )
+                    
+                    # Kiểm tra thông tin bắt buộc
+                    if not student_name or not class_name:
+                        st.error("""
+                        ⚠️ **VUI LÒNG NHẬP ĐẦY ĐỦ THÔNG TIN TRƯỚC KHI LÀM BÀI!**
                         
-                        col1, col2, col3 = st.columns(3)
+                        **THÔNG TIN BẮT BUỘC:**
+                        1. **👨‍🎓 Họ và tên** 
+                        2. **🏫 Lớp học**
                         
-                        with col1:
-                            student_name = st.text_input(
-                                "**Họ và tên:**",
-                                placeholder="Nguyễn Văn A",
-                                help="Nhập họ tên đầy đủ",
-                                key="take_student_name"
-                            )
+                        **LƯU Ý:** Không nhập thông tin sẽ KHÔNG được làm bài!
+                        """)
+                        st.stop()
+                    
+                    # Validate thông tin
+                    validation_errors = validate_student_info(student_name, class_name)
+                    if validation_errors:
+                        for error in validation_errors:
+                            st.error(error)
+                        st.stop()
+                    
+                    # Hiển thị thông tin đã nhập
+                    st.markdown(f"""
+                    <div class="student-info-card">
+                        <h4>📋 THÔNG TIN BÀI THI</h4>
+                        <p><strong>👨‍🎓 Học sinh:</strong> {student_name}</p>
+                        <p><strong>🏫 Lớp:</strong> {class_name}</p>
+                        <p><strong>🆔 Mã HS:</strong> {student_id if student_id else 'Không có'}</p>
+                        <p><strong>📝 Mã Quiz:</strong> {quiz_code}</p>
+                        <p><strong>🔢 Số câu:</strong> {len(questions)}</p>
+                        <p><strong>⏱️ Thời gian bắt đầu:</strong> {datetime.now().strftime('%H:%M %d/%m/%Y')}</p>
+                    </div>
+                    """, unsafe_allow_html=True)
+                    
+                    st.markdown("---")
+                    st.subheader("📝 **BẮT ĐẦU LÀM BÀI**")
+                    
+                    # Lưu câu trả lời trong session state
+                    if 'quiz_answers' not in st.session_state:
+                        st.session_state.quiz_answers = {}
+                    
+                    answers = st.session_state.quiz_answers
+                    
+                    for i, q in enumerate(questions):
+                        st.markdown(f"### **Câu {i+1}:** {q['question_text']}")
                         
-                        with col2:
-                            class_name = st.text_input(
-                                "**Lớp:**",
-                                placeholder="10A1",
-                                help="Nhập tên lớp",
-                                key="take_class_name"
-                            )
+                        # Hiển thị các lựa chọn
+                        options = [
+                            ("A", q['option_a']),
+                            ("B", q['option_b']),
+                            ("C", q['option_c']),
+                            ("D", q['option_d'])
+                        ]
                         
-                        with col3:
-                            student_id = st.text_input(
-                                "**Mã học sinh:**",
-                                placeholder="HS001",
-                                help="Mã số học sinh (nếu có)",
-                                key="take_student_id"
-                            )
+                        selected = answers.get(str(q['id']))
                         
-                        if student_name and class_name:
-                            st.markdown(f"""
-                            <div class="student-info-card">
-                                <h4>📋 THÔNG TIN BÀI THI</h4>
-                                <p><strong>👨‍🎓 Học sinh:</strong> {student_name}</p>
-                                <p><strong>🏫 Lớp:</strong> {class_name}</p>
-                                <p><strong>📝 Mã Quiz:</strong> {quiz_code}</p>
-                                <p><strong>🔢 Số câu:</strong> {len(questions)}</p>
-                                <p><strong>⏱️ Thời gian bắt đầu:</strong> {datetime.now().strftime('%H:%M %d/%m/%Y')}</p>
-                            </div>
-                            """, unsafe_allow_html=True)
+                        # Tạo các nút lựa chọn
+                        cols = st.columns(4)
+                        for idx, (opt_key, opt_text) in enumerate(options):
+                            with cols[idx]:
+                                button_text = f"{opt_key}: {opt_text[:30]}..." if len(opt_text) > 30 else f"{opt_key}: {opt_text}"
+                                if st.button(
+                                    button_text,
+                                    key=f"opt_{q['id']}_{opt_key}",
+                                    type="primary" if selected == opt_key else "secondary",
+                                    use_container_width=True
+                                ):
+                                    answers[str(q['id'])] = opt_key
+                                    st.rerun()
+                        
+                        # Hiển thị đã chọn
+                        if selected:
+                            option_texts = {
+                                'A': q['option_a'],
+                                'B': q['option_b'],
+                                'C': q['option_c'],
+                                'D': q['option_d']
+                            }
+                            st.info(f"✅ **Bạn đã chọn:** **{selected}** - {option_texts[selected]}")
+                        
+                        st.markdown("---")
+                    
+                    # Nút nộp bài
+                    if st.button("📤 **NỘP BÀI THI**", type="primary", use_container_width=True):
+                        if len(answers) < len(questions):
+                            st.warning(f"⚠️ **BẠN MỚI TRẢ LỜI {len(answers)}/{len(questions)} CÂU!** Vẫn nộp bài?")
+                        
+                        # Tính điểm
+                        score = 0
+                        details = []
+                        
+                        for q in questions:
+                            question_id = str(q['id'])
+                            user_answer = answers.get(question_id, '').upper()
+                            is_correct = (user_answer == q['correct_answer'])
                             
-                            st.markdown("---")
-                            st.subheader("📝 **BẮT ĐẦU LÀM BÀI**")
+                            if is_correct:
+                                score += 1
                             
-                            # Lưu câu trả lời trong session state
-                            if 'quiz_answers' not in st.session_state:
-                                st.session_state.quiz_answers = {}
-                            
-                            answers = st.session_state.quiz_answers
-                            
-                            for i, q in enumerate(questions):
-                                st.markdown(f"### **Câu {i+1}:** {q['question_text']}")
+                            details.append({
+                                'question': q['question_text'],
+                                'user_answer': user_answer if user_answer else 'Không trả lời',
+                                'correct_answer': q['correct_answer'],
+                                'is_correct': is_correct,
+                                'explanation': q['explanation']
+                            })
+                        
+                        # Tính phần trăm và xếp loại
+                        percentage = (score / len(questions)) * 100
+                        grade, evaluation, grade_color = calculate_grade(percentage)
+                        
+                        # Lưu kết quả
+                        conn = sqlite3.connect('quiz_system.db')
+                        c = conn.cursor()
+                        c.execute('''INSERT INTO results 
+                                     (quiz_code, student_name, class_name, student_id, 
+                                      score, total_questions, percentage, grade, submitted_at)
+                                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+                                 (quiz_code, student_name, class_name, student_id,
+                                  score, len(questions), percentage, grade, datetime.now()))
+                        conn.commit()
+                        
+                        # Lấy ID kết quả vừa lưu
+                        result_id = c.lastrowid
+                        conn.close()
+                        
+                        # Hiển thị kết quả
+                        st.markdown(f"""
+                        <div class="score-card">
+                            <h1>{evaluation.split()[-1]}</h1>
+                            <h2>{evaluation}</h2>
+                            <h3>Điểm: {score}/{len(questions)}</h3>
+                            <p>Tỉ lệ: {percentage:.1f}% | Xếp loại: <span style="color: {grade_color}">{grade}</span></p>
+                            <p><small>Mã bài thi: {result_id}</small></p>
+                        </div>
+                        """, unsafe_allow_html=True)
+                        
+                        # Thông tin lưu trữ
+                        st.markdown(f"""
+                        <div class="student-info-card">
+                            <h4>✅ ĐÃ LƯU KẾT QUẢ</h4>
+                            <p><strong>🆔 Mã bài thi:</strong> {result_id} (Ghi nhớ để tra cứu sau)</p>
+                            <p><strong>📋 Mã Quiz:</strong> {quiz_code}</p>
+                            <p><strong>👨‍🎓 Học sinh:</strong> {student_name}</p>
+                            <p><strong>🏫 Lớp:</strong> {class_name}</p>
+                            <p><strong>📅 Thời gian:</strong> {datetime.now().strftime('%H:%M %d/%m/%Y')}</p>
+                        </div>
+                        """, unsafe_allow_html=True)
+                        
+                        # Chi tiết từng câu
+                        with st.expander("📋 **XEM CHI TIẾT TỪNG CÂU**", expanded=False):
+                            for i, detail in enumerate(details):
+                                if detail['is_correct']:
+                                    st.success(f"**Câu {i+1}:** {detail['question']}")
+                                    st.markdown(f"✅ **Bạn chọn:** **{detail['user_answer']}** (Đúng)")
+                                else:
+                                    st.error(f"**Câu {i+1}:** {detail['question']}")
+                                    st.markdown(f"❌ **Bạn chọn:** **{detail['user_answer']}**")
+                                    st.markdown(f"✅ **Đáp án đúng:** **{detail['correct_answer']}**")
                                 
-                                # Hiển thị các lựa chọn
-                                options = [
-                                    ("A", q['option_a']),
-                                    ("B", q['option_b']),
-                                    ("C", q['option_c']),
-                                    ("D", q['option_d'])
-                                ]
-                                
-                                selected = answers.get(str(q['id']))
-                                
-                                # Tạo các nút lựa chọn
-                                cols = st.columns(4)
-                                for idx, (opt_key, opt_text) in enumerate(options):
-                                    with cols[idx]:
-                                        if st.button(
-                                            f"{opt_key}: {opt_text[:30]}..." if len(opt_text) > 30 else f"{opt_key}: {opt_text}",
-                                            key=f"opt_{q['id']}_{opt_key}",
-                                            type="primary" if selected == opt_key else "secondary",
-                                            use_container_width=True
-                                        ):
-                                            answers[str(q['id'])] = opt_key
-                                            st.rerun()
-                                
-                                # Hiển thị đã chọn
-                                if selected:
-                                    option_texts = {
-                                        'A': q['option_a'],
-                                        'B': q['option_b'],
-                                        'C': q['option_c'],
-                                        'D': q['option_d']
-                                    }
-                                    st.info(f"✅ **Bạn đã chọn:** **{selected}** - {option_texts[selected]}")
-                                
+                                st.markdown(f"💡 **Giải thích:** {detail['explanation']}")
                                 st.markdown("---")
-                            
-                            # Nút nộp bài
-                            if st.button("📤 **NỘP BÀI THI**", type="primary", use_container_width=True):
-                                if len(answers) < len(questions):
-                                    st.warning(f"⚠️ **BẠN MỚI TRẢ LỜI {len(answers)}/{len(questions)} CÂU!** Vẫn nộp bài?")
-                                
-                                # Tính điểm
-                                score = 0
-                                details = []
-                                
-                                for q in questions:
-                                    question_id = str(q['id'])
-                                    user_answer = answers.get(question_id, '').upper()
-                                    is_correct = (user_answer == q['correct_answer'])
-                                    
-                                    if is_correct:
-                                        score += 1
-                                    
-                                    details.append({
-                                        'question': q['question_text'],
-                                        'user_answer': user_answer if user_answer else 'Không trả lời',
-                                        'correct_answer': q['correct_answer'],
-                                        'is_correct': is_correct,
-                                        'explanation': q['explanation']
-                                    })
-                                
-                                # Tính phần trăm và xếp loại
-                                percentage = (score / len(questions)) * 100
-                                grade, evaluation, grade_color = calculate_grade(percentage)
-                                
-                                # Lưu kết quả
-                                conn = sqlite3.connect('quiz_system.db')
-                                c = conn.cursor()
-                                c.execute('''INSERT INTO results 
-                                             (quiz_code, student_name, class_name, student_id, 
-                                              score, total_questions, percentage, grade, submitted_at)
-                                             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)''',
-                                         (quiz_code, student_name, class_name, student_id,
-                                          score, len(questions), percentage, grade, datetime.now()))
-                                conn.commit()
-                                
-                                # Lấy ID kết quả vừa lưu
-                                result_id = c.lastrowid
-                                conn.close()
-                                
-                                # Hiển thị kết quả
-                                st.markdown(f"""
-                                <div class="score-card">
-                                    <h1>{evaluation.split()[-1]}</h1>
-                                    <h2>{evaluation}</h2>
-                                    <h3>Điểm: {score}/{len(questions)}</h3>
-                                    <p>Tỉ lệ: {percentage:.1f}% | Xếp loại: <span style="color: {grade_color}">{grade}</span></p>
-                                    <p><small>Mã bài thi: {result_id}</small></p>
-                                </div>
-                                """, unsafe_allow_html=True)
-                                
-                                # Thông tin lưu trữ
-                                st.markdown(f"""
-                                <div class="success-box">
-                                    <h4>✅ ĐÃ LƯU KẾT QUẢ</h4>
-                                    <p><strong>🆔 Mã bài thi:</strong> {result_id} (Ghi nhớ để tra cứu sau)</p>
-                                    <p><strong>📋 Mã Quiz:</strong> {quiz_code}</p>
-                                    <p><strong>👨‍🎓 Học sinh:</strong> {student_name}</p>
-                                    <p><strong>🏫 Lớp:</strong> {class_name}</p>
-                                    <p><strong>📅 Thời gian:</strong> {datetime.now().strftime('%H:%M %d/%m/%Y')}</p>
-                                </div>
-                                """, unsafe_allow_html=True)
-                                
-                                # Chi tiết từng câu
-                                with st.expander("📋 **XEM CHI TIẾT TỪNG CÂU**", expanded=False):
-                                    for i, detail in enumerate(details):
-                                        if detail['is_correct']:
-                                            st.success(f"**Câu {i+1}:** {detail['question']}")
-                                            st.markdown(f"✅ **Bạn chọn:** **{detail['user_answer']}** (Đúng)")
-                                        else:
-                                            st.error(f"**Câu {i+1}:** {detail['question']}")
-                                            st.markdown(f"❌ **Bạn chọn:** **{detail['user_answer']}**")
-                                            st.markdown(f"✅ **Đáp án đúng:** **{detail['correct_answer']}**")
-                                        
-                                        st.markdown(f"💡 **Giải thích:** {detail['explanation']}")
-                                        st.markdown("---")
-                                
-                                # Xóa session state
-                                if 'quiz_answers' in st.session_state:
-                                    del st.session_state.quiz_answers
-                                
-                                st.balloons()
-                                st.info("💡 **LƯU Ý:** Ghi nhớ mã bài thi để tra cứu lại kết quả sau này!")
                         
-                        elif quiz_code and (not student_name or not class_name):
-                            st.warning("⚠️ **VUI LÒNG NHẬP ĐẦY ĐỦ HỌ TÊN VÀ LỚP TRƯỚC KHI LÀM BÀI!**")
+                        # Xóa session state
+                        if 'quiz_answers' in st.session_state:
+                            del st.session_state.quiz_answers
+                        
+                        st.balloons()
+                        st.info("💡 **LƯU Ý:** Ghi nhớ mã bài thi ({}) để tra cứu lại kết quả sau này!".format(result_id))
         
         with tab2:
             st.markdown("### 🔍 **TRA CỨU BÀI ĐÃ LÀM**")
@@ -1213,13 +1138,80 @@ def main():
                                 st.info(f"**Mã bài thi:** {r['id']} | **Mã Quiz:** {r['quiz_code']}")
                     else:
                         st.info("📭 Không tìm thấy bài thi nào")
+            
+            elif search_option == "Mã bài thi":
+                result_id = st.text_input("Nhập mã bài thi:", placeholder="123")
+                if result_id and result_id.isdigit():
+                    conn = sqlite3.connect('quiz_system.db')
+                    conn.row_factory = sqlite3.Row
+                    c = conn.cursor()
+                    c.execute('SELECT * FROM results WHERE id = ?', (int(result_id),))
+                    result = c.fetchone()
+                    conn.close()
+                    
+                    if result:
+                        st.success("✅ Tìm thấy bài thi")
+                        
+                        col1, col2, col3 = st.columns(3)
+                        with col1:
+                            st.metric("Điểm", f"{result['score']}/{result['total_questions']}")
+                        with col2:
+                            st.metric("Tỉ lệ", f"{result['percentage']:.1f}%")
+                        with col3:
+                            grade_color = {
+                                'A+': '#FFD700', 'A': '#C0C0C0', 'B': '#CD7F32',
+                                'C': '#4CAF50', 'D': '#FF9800', 'F': '#F44336'
+                            }.get(result['grade'], '#000000')
+                            st.markdown(f"**Xếp loại:** <span style='color: {grade_color}'>{result['grade']}</span>", unsafe_allow_html=True)
+                        
+                        st.info(f"""
+                        **Thông tin chi tiết:**
+                        - **Học sinh:** {result['student_name']}
+                        - **Lớp:** {result['class_name']}
+                        - **Mã HS:** {result['student_id'] or 'Không có'}
+                        - **Mã Quiz:** {result['quiz_code']}
+                        - **Thời gian:** {result['submitted_at']}
+                        """)
+                    else:
+                        st.error("❌ Không tìm thấy bài thi với mã này")
+            
+            else:  # Mã Quiz
+                search_quiz = st.text_input("Nhập mã Quiz:", placeholder="ABC123XYZ").upper()
+                if search_quiz:
+                    conn = sqlite3.connect('quiz_system.db')
+                    conn.row_factory = sqlite3.Row
+                    c = conn.cursor()
+                    c.execute('SELECT * FROM results WHERE quiz_code = ? ORDER BY percentage DESC', (search_quiz,))
+                    results = c.fetchall()
+                    conn.close()
+                    
+                    if results:
+                        st.success(f"✅ Tìm thấy {len(results)} bài thi cho Quiz {search_quiz}")
+                        
+                        # Hiển thị bảng xếp hạng
+                        data = []
+                        for i, r in enumerate(results):
+                            data.append({
+                                "Hạng": i+1,
+                                "Họ tên": r['student_name'],
+                                "Lớp": r['class_name'],
+                                "Điểm": f"{r['score']}/{r['total_questions']}",
+                                "Tỉ lệ": f"{r['percentage']:.1f}%",
+                                "Xếp loại": r['grade'],
+                                "Thời gian": r['submitted_at'][:16]
+                            })
+                        
+                        df = pd.DataFrame(data)
+                        st.dataframe(df, use_container_width=True, hide_index=True)
+                    else:
+                        st.info("📭 Không tìm thấy bài thi nào cho Quiz này")
     
     # ==================== TRA CỨU KẾT QUẢ ====================
     elif menu == "🔍 TRA CỨU KẾT QUẢ":
         st.header("🔍 TRA CỨU KẾT QUẢ CHI TIẾT")
         
         st.markdown("""
-        <div class="search-card">
+        <div class="student-info-card">
             <h4>🎯 TÌM KIẾM THEO NHIỀU TIÊU CHÍ</h4>
             <p>Tìm kiếm linh hoạt theo tên học sinh, lớp, mã quiz, hoặc khoảng điểm</p>
         </div>
@@ -1317,10 +1309,6 @@ def main():
                             format="%.1f%%",
                             min_value=0,
                             max_value=100,
-                        ),
-                        "Xếp loại": st.column_config.TextColumn(
-                            "Xếp loại",
-                            help="Điểm chữ",
                         )
                     },
                     hide_index=True
@@ -1429,21 +1417,38 @@ def main():
                 grade_dist = c.fetchall()
                 
                 if grade_dist:
-                    # Tạo biểu đồ
-                    grade_data = pd.DataFrame(grade_dist)
+                    # Hiển thị bảng phân bố
+                    grade_data = []
+                    for g in grade_dist:
+                        grade_data.append({
+                            "Khoảng điểm": g['grade_range'],
+                            "Số bài": g['count'],
+                            "Tỉ lệ": f"{g['percentage']}%"
+                        })
                     
-                    fig = px.pie(
-                        grade_data, 
-                        values='count', 
-                        names='grade_range',
-                        title='Phân bố điểm theo khoảng',
-                        color_discrete_sequence=px.colors.sequential.RdBu
-                    )
-                    fig.update_traces(textposition='inside', textinfo='percent+label')
-                    st.plotly_chart(fig, use_container_width=True)
+                    df_grade = pd.DataFrame(grade_data)
+                    st.dataframe(df_grade, use_container_width=True, hide_index=True)
                     
-                    # Hiển thị bảng
-                    st.dataframe(grade_data, use_container_width=True, hide_index=True)
+                    # Hiển thị bằng metric cards
+                    cols = st.columns(len(grade_dist))
+                    for idx, g in enumerate(grade_dist):
+                        with cols[idx]:
+                            color = {
+                                'A+ (90-100%)': '#FFD700',
+                                'A (80-89%)': '#C0C0C0',
+                                'B (70-79%)': '#CD7F32',
+                                'C (60-69%)': '#4CAF50',
+                                'D (50-59%)': '#FF9800',
+                                'F (<50%)': '#F44336'
+                            }.get(g['grade_range'], '#9E9E9E')
+                            
+                            st.markdown(f"""
+                            <div style="text-align: center; padding: 10px; background-color: {color}; border-radius: 10px;">
+                                <h4>{g['grade_range'].split()[0]}</h4>
+                                <h3>{g['count']}</h3>
+                                <p>{g['percentage']}%</p>
+                            </div>
+                            """, unsafe_allow_html=True)
                 
                 # Top 10 học sinh xuất sắc
                 st.markdown("### 🏆 **TOP 10 HỌC SINH XUẤT SẮC**")
@@ -1454,7 +1459,7 @@ def main():
                            MAX(percentage) as best_score
                     FROM results 
                     GROUP BY student_name, class_name
-                    HAVING COUNT(*) >= 3
+                    HAVING COUNT(*) >= 2
                     ORDER BY avg_score DESC
                     LIMIT 10
                 ''')
@@ -1474,11 +1479,193 @@ def main():
                     
                     df_top = pd.DataFrame(top_data)
                     st.dataframe(df_top, use_container_width=True, hide_index=True)
+                else:
+                    st.info("📭 Chưa có đủ dữ liệu để xếp hạng")
                 
                 conn.close()
                 
             except Exception as e:
                 st.error(f"❌ Lỗi thống kê: {str(e)}")
+        
+        with tab2:
+            st.markdown("### 🏫 **THỐNG KÊ THEO LỚP**")
+            
+            # Lấy danh sách lớp
+            classes = get_distinct_classes()
+            
+            if classes:
+                selected_class = st.selectbox("Chọn lớp để xem thống kê:", classes)
+                
+                if selected_class:
+                    try:
+                        conn = sqlite3.connect('quiz_system.db')
+                        conn.row_factory = sqlite3.Row
+                        c = conn.cursor()
+                        
+                        # Thống kê lớp
+                        c.execute('''
+                            SELECT COUNT(*) as total_tests,
+                                   COUNT(DISTINCT student_name) as total_students,
+                                   AVG(percentage) as avg_score,
+                                   MAX(percentage) as max_score,
+                                   MIN(percentage) as min_score
+                            FROM results 
+                            WHERE class_name = ?
+                        ''', (selected_class,))
+                        
+                        class_stats = c.fetchone()
+                        
+                        # Top học sinh trong lớp
+                        c.execute('''
+                            SELECT student_name,
+                                   COUNT(*) as test_count,
+                                   ROUND(AVG(percentage), 1) as avg_score,
+                                   MAX(percentage) as best_score
+                            FROM results 
+                            WHERE class_name = ?
+                            GROUP BY student_name
+                            ORDER BY avg_score DESC
+                            LIMIT 10
+                        ''', (selected_class,))
+                        
+                        top_in_class = c.fetchall()
+                        
+                        conn.close()
+                        
+                        # Hiển thị thống kê lớp
+                        if class_stats['total_tests'] > 0:
+                            col1, col2, col3, col4 = st.columns(4)
+                            with col1:
+                                st.metric("📋 Tổng bài thi", class_stats['total_tests'])
+                            with col2:
+                                st.metric("👨‍🎓 Số học sinh", class_stats['total_students'])
+                            with col3:
+                                st.metric("📊 Điểm TB", f"{class_stats['avg_score']:.1f}%")
+                            with col4:
+                                st.metric("📈 Điểm cao nhất", f"{class_stats['max_score']:.1f}%")
+                            
+                            # Danh sách học sinh trong lớp
+                            st.markdown("### 👨‍🎓 **DANH SÁCH HỌC SINH TRONG LỚP**")
+                            students_in_class = get_students_by_class(selected_class)
+                            
+                            if students_in_class:
+                                student_data = []
+                                for s in students_in_class:
+                                    student_data.append({
+                                        "Họ tên": s['student_name'],
+                                        "Mã HS": s['student_id'] or "",
+                                        "Lớp": s['class_name']
+                                    })
+                                
+                                df_students = pd.DataFrame(student_data)
+                                st.dataframe(df_students, use_container_width=True, hide_index=True)
+                            
+                            # Top học sinh trong lớp
+                            if top_in_class:
+                                st.markdown("### 🏆 **TOP HỌC SINH TRONG LỚP**")
+                                top_data = []
+                                for i, s in enumerate(top_in_class):
+                                    top_data.append({
+                                        "Hạng": i+1,
+                                        "Họ tên": s['student_name'],
+                                        "Số bài": s['test_count'],
+                                        "Điểm TB": f"{s['avg_score']}%",
+                                        "Điểm cao nhất": f"{s['best_score']}%"
+                                    })
+                                
+                                df_top_class = pd.DataFrame(top_data)
+                                st.dataframe(df_top_class, use_container_width=True, hide_index=True)
+                        else:
+                            st.info(f"📭 Lớp {selected_class} chưa có bài thi nào")
+                            
+                    except Exception as e:
+                        st.error(f"❌ Lỗi: {str(e)}")
+            else:
+                st.info("📭 Chưa có dữ liệu lớp học")
+        
+        with tab3:
+            st.markdown("### 📝 **THỐNG KÊ THEO QUIZ**")
+            
+            try:
+                conn = sqlite3.connect('quiz_system.db')
+                c = conn.cursor()
+                c.execute("SELECT DISTINCT quiz_code FROM results ORDER BY quiz_code")
+                quizzes = [row[0] for row in c.fetchall()]
+                conn.close()
+                
+                if quizzes:
+                    selected_quiz = st.selectbox("Chọn Quiz để xem thống kê:", quizzes)
+                    
+                    if selected_quiz:
+                        conn = sqlite3.connect('quiz_system.db')
+                        conn.row_factory = sqlite3.Row
+                        c = conn.cursor()
+                        
+                        # Thống kê quiz
+                        c.execute('''
+                            SELECT COUNT(*) as total_tests,
+                                   COUNT(DISTINCT student_name) as total_students,
+                                   COUNT(DISTINCT class_name) as total_classes,
+                                   AVG(percentage) as avg_score,
+                                   MAX(percentage) as max_score,
+                                   MIN(percentage) as min_score
+                            FROM results 
+                            WHERE quiz_code = ?
+                        ''', (selected_quiz,))
+                        
+                        quiz_stats = c.fetchone()
+                        
+                        # Top học sinh trong quiz
+                        c.execute('''
+                            SELECT student_name, class_name,
+                                   score, total_questions,
+                                   percentage, grade, submitted_at
+                            FROM results 
+                            WHERE quiz_code = ?
+                            ORDER BY percentage DESC
+                            LIMIT 10
+                        ''', (selected_quiz,))
+                        
+                        top_in_quiz = c.fetchall()
+                        
+                        conn.close()
+                        
+                        # Hiển thị thống kê quiz
+                        if quiz_stats['total_tests'] > 0:
+                            col1, col2, col3, col4 = st.columns(4)
+                            with col1:
+                                st.metric("📋 Tổng bài thi", quiz_stats['total_tests'])
+                            with col2:
+                                st.metric("👨‍🎓 Số học sinh", quiz_stats['total_students'])
+                            with col3:
+                                st.metric("🏫 Số lớp", quiz_stats['total_classes'])
+                            with col4:
+                                st.metric("📊 Điểm TB", f"{quiz_stats['avg_score']:.1f}%")
+                            
+                            # Top học sinh trong quiz
+                            if top_in_quiz:
+                                st.markdown("### 🏆 **TOP HỌC SINH TRONG QUIZ**")
+                                top_data = []
+                                for i, s in enumerate(top_in_quiz):
+                                    top_data.append({
+                                        "Hạng": i+1,
+                                        "Họ tên": s['student_name'],
+                                        "Lớp": s['class_name'],
+                                        "Điểm": f"{s['score']}/{s['total_questions']}",
+                                        "Tỉ lệ": f"{s['percentage']:.1f}%",
+                                        "Xếp loại": s['grade']
+                                    })
+                                
+                                df_top_quiz = pd.DataFrame(top_data)
+                                st.dataframe(df_top_quiz, use_container_width=True, hide_index=True)
+                        else:
+                            st.info(f"📭 Quiz {selected_quiz} chưa có bài thi nào")
+                            
+                else:
+                    st.info("📭 Chưa có dữ liệu quiz")
+                    
+            except Exception as e:
+                st.error(f"❌ Lỗi: {str(e)}")
     
     # ==================== BẢNG XẾP HẠNG ====================
     elif menu == "🏆 BẢNG XẾP HẠNG":
@@ -1491,15 +1678,139 @@ def main():
         )
         
         if rank_type == "🏫 Theo lớp":
-            conn = sqlite3.connect('quiz_system.db')
-            c = conn.cursor()
-            c.execute("SELECT DISTINCT class_name FROM results WHERE class_name != '' ORDER BY class_name")
-            classes = [row[0] for row in c.fetchall()]
-            conn.close()
+            classes = get_distinct_classes()
             
-            selected_class = st.selectbox("Chọn lớp:", classes)
-            
-            if selected_class:
+            if classes:
+                selected_class = st.selectbox("Chọn lớp:", classes)
+                
+                if selected_class:
+                    conn = sqlite3.connect('quiz_system.db')
+                    conn.row_factory = sqlite3.Row
+                    c = conn.cursor()
+                    c.execute('''
+                        SELECT student_name, class_name, quiz_code, 
+                               score, total_questions, percentage, grade, submitted_at
+                        FROM results 
+                        WHERE class_name = ? 
+                        ORDER BY percentage DESC, submitted_at 
+                        LIMIT 20
+                    ''', (selected_class,))
+                    rankings = c.fetchall()
+                    conn.close()
+                    
+                    if rankings:
+                        st.success(f"🏫 **BẢNG XẾP HẠNG LỚP {selected_class}**")
+                        
+                        for i, r in enumerate(rankings):
+                            if i == 0:
+                                medal = "🥇"
+                                rank_class = "rank-1"
+                            elif i == 1:
+                                medal = "🥈"
+                                rank_class = "rank-2"
+                            elif i == 2:
+                                medal = "🥉"
+                                rank_class = "rank-3"
+                            else:
+                                medal = f"#{i+1}"
+                                rank_class = ""
+                            
+                            st.markdown(f"""
+                            <div class="quiz-card {rank_class}" style="margin: 10px 0;">
+                                <div style="display: flex; justify-content: space-between; align-items: center;">
+                                    <div>
+                                        <h4 style="margin: 0;">{medal} {r['student_name']}</h4>
+                                        <p style="margin: 5px 0 0 0; font-size: 0.9em;">
+                                            {r['class_name']} | Quiz: {r['quiz_code']}
+                                        </p>
+                                    </div>
+                                    <div style="text-align: right;">
+                                        <h3 style="margin: 0; color: #3B82F6;">{r['percentage']:.1f}%</h3>
+                                        <p style="margin: 5px 0 0 0; font-size: 0.9em;">
+                                            {r['score']}/{r['total_questions']} | {r['grade']}
+                                        </p>
+                                    </div>
+                                </div>
+                                <p style="margin: 10px 0 0 0; font-size: 0.8em; color: #666;">
+                                    📅 {r['submitted_at'][:16]}
+                                </p>
+                            </div>
+                            """, unsafe_allow_html=True)
+            else:
+                st.info("📭 Chưa có dữ liệu lớp học")
+        
+        elif rank_type == "📝 Theo Quiz":
+            try:
+                conn = sqlite3.connect('quiz_system.db')
+                c = conn.cursor()
+                c.execute("SELECT DISTINCT quiz_code FROM results ORDER BY quiz_code")
+                quizzes = [row[0] for row in c.fetchall()]
+                conn.close()
+                
+                if quizzes:
+                    selected_quiz = st.selectbox("Chọn mã Quiz:", quizzes)
+                    
+                    if selected_quiz:
+                        conn = sqlite3.connect('quiz_system.db')
+                        conn.row_factory = sqlite3.Row
+                        c = conn.cursor()
+                        c.execute('''
+                            SELECT student_name, class_name, quiz_code, 
+                                   score, total_questions, percentage, grade, submitted_at
+                            FROM results 
+                            WHERE quiz_code = ? 
+                            ORDER BY percentage DESC, submitted_at 
+                            LIMIT 20
+                        ''', (selected_quiz,))
+                        rankings = c.fetchall()
+                        conn.close()
+                        
+                        if rankings:
+                            st.success(f"📝 **BẢNG XẾP HẠNG QUIZ {selected_quiz}**")
+                            
+                            for i, r in enumerate(rankings):
+                                if i == 0:
+                                    medal = "🥇"
+                                    rank_class = "rank-1"
+                                elif i == 1:
+                                    medal = "🥈"
+                                    rank_class = "rank-2"
+                                elif i == 2:
+                                    medal = "🥉"
+                                    rank_class = "rank-3"
+                                else:
+                                    medal = f"#{i+1}"
+                                    rank_class = ""
+                                
+                                st.markdown(f"""
+                                <div class="quiz-card {rank_class}" style="margin: 10px 0;">
+                                    <div style="display: flex; justify-content: space-between; align-items: center;">
+                                        <div>
+                                            <h4 style="margin: 0;">{medal} {r['student_name']}</h4>
+                                            <p style="margin: 5px 0 0 0; font-size: 0.9em;">
+                                                {r['class_name']}
+                                            </p>
+                                        </div>
+                                        <div style="text-align: right;">
+                                            <h3 style="margin: 0; color: #3B82F6;">{r['percentage']:.1f}%</h3>
+                                            <p style="margin: 5px 0 0 0; font-size: 0.9em;">
+                                                {r['score']}/{r['total_questions']} | {r['grade']}
+                                            </p>
+                                        </div>
+                                    </div>
+                                    <p style="margin: 10px 0 0 0; font-size: 0.8em; color: #666;">
+                                        📅 {r['submitted_at'][:16]}
+                                    </p>
+                                </div>
+                                """, unsafe_allow_html=True)
+                else:
+                    st.info("📭 Chưa có dữ liệu quiz")
+                    
+            except Exception as e:
+                st.error(f"❌ Lỗi: {str(e)}")
+        
+        else:  # Toàn trường
+            try:
                 conn = sqlite3.connect('quiz_system.db')
                 conn.row_factory = sqlite3.Row
                 c = conn.cursor()
@@ -1507,15 +1818,14 @@ def main():
                     SELECT student_name, class_name, quiz_code, 
                            score, total_questions, percentage, grade, submitted_at
                     FROM results 
-                    WHERE class_name = ? 
                     ORDER BY percentage DESC, submitted_at 
                     LIMIT 20
-                ''', (selected_class,))
+                ''')
                 rankings = c.fetchall()
                 conn.close()
                 
                 if rankings:
-                    st.success(f"🏫 **BẢNG XẾP HẠNG LỚP {selected_class}**")
+                    st.success("🏆 **BẢNG XẾP HẠNG TOÀN TRƯỜNG (TOP 20)**")
                     
                     for i, r in enumerate(rankings):
                         if i == 0:
@@ -1552,122 +1862,11 @@ def main():
                             </p>
                         </div>
                         """, unsafe_allow_html=True)
-        
-        elif rank_type == "📝 Theo Quiz":
-            conn = sqlite3.connect('quiz_system.db')
-            c = conn.cursor()
-            c.execute("SELECT DISTINCT quiz_code FROM results ORDER BY quiz_code")
-            quizzes = [row[0] for row in c.fetchall()]
-            conn.close()
-            
-            selected_quiz = st.selectbox("Chọn mã Quiz:", quizzes)
-            
-            if selected_quiz:
-                conn = sqlite3.connect('quiz_system.db')
-                conn.row_factory = sqlite3.Row
-                c = conn.cursor()
-                c.execute('''
-                    SELECT student_name, class_name, quiz_code, 
-                           score, total_questions, percentage, grade, submitted_at
-                    FROM results 
-                    WHERE quiz_code = ? 
-                    ORDER BY percentage DESC, submitted_at 
-                    LIMIT 20
-                ''', (selected_quiz,))
-                rankings = c.fetchall()
-                conn.close()
-                
-                if rankings:
-                    st.success(f"📝 **BẢNG XẾP HẠNG QUIZ {selected_quiz}**")
+                else:
+                    st.info("📭 Chưa có dữ liệu xếp hạng")
                     
-                    for i, r in enumerate(rankings):
-                        if i == 0:
-                            medal = "🥇"
-                            rank_class = "rank-1"
-                        elif i == 1:
-                            medal = "🥈"
-                            rank_class = "rank-2"
-                        elif i == 2:
-                            medal = "🥉"
-                            rank_class = "rank-3"
-                        else:
-                            medal = f"#{i+1}"
-                            rank_class = ""
-                        
-                        st.markdown(f"""
-                        <div class="quiz-card {rank_class}" style="margin: 10px 0;">
-                            <div style="display: flex; justify-content: space-between; align-items: center;">
-                                <div>
-                                    <h4 style="margin: 0;">{medal} {r['student_name']}</h4>
-                                    <p style="margin: 5px 0 0 0; font-size: 0.9em;">
-                                        {r['class_name']}
-                                    </p>
-                                </div>
-                                <div style="text-align: right;">
-                                    <h3 style="margin: 0; color: #3B82F6;">{r['percentage']:.1f}%</h3>
-                                    <p style="margin: 5px 0 0 0; font-size: 0.9em;">
-                                        {r['score']}/{r['total_questions']} | {r['grade']}
-                                    </p>
-                                </div>
-                            </div>
-                            <p style="margin: 10px 0 0 0; font-size: 0.8em; color: #666;">
-                                📅 {r['submitted_at'][:16]}
-                            </p>
-                        </div>
-                        """, unsafe_allow_html=True)
-        
-        else:  # Toàn trường
-            conn = sqlite3.connect('quiz_system.db')
-            conn.row_factory = sqlite3.Row
-            c = conn.cursor()
-            c.execute('''
-                SELECT student_name, class_name, quiz_code, 
-                       score, total_questions, percentage, grade, submitted_at
-                FROM results 
-                ORDER BY percentage DESC, submitted_at 
-                LIMIT 20
-            ''')
-            rankings = c.fetchall()
-            conn.close()
-            
-            if rankings:
-                st.success("🏆 **BẢNG XẾP HẠNG TOÀN TRƯỜNG (TOP 20)**")
-                
-                for i, r in enumerate(rankings):
-                    if i == 0:
-                        medal = "🥇"
-                        rank_class = "rank-1"
-                    elif i == 1:
-                        medal = "🥈"
-                        rank_class = "rank-2"
-                    elif i == 2:
-                        medal = "🥉"
-                        rank_class = "rank-3"
-                    else:
-                        medal = f"#{i+1}"
-                        rank_class = ""
-                    
-                    st.markdown(f"""
-                    <div class="quiz-card {rank_class}" style="margin: 10px 0;">
-                        <div style="display: flex; justify-content: space-between; align-items: center;">
-                            <div>
-                                <h4 style="margin: 0;">{medal} {r['student_name']}</h4>
-                                <p style="margin: 5px 0 0 0; font-size: 0.9em;">
-                                    {r['class_name']} | Quiz: {r['quiz_code']}
-                                </p>
-                            </div>
-                            <div style="text-align: right;">
-                                <h3 style="margin: 0; color: #3B82F6;">{r['percentage']:.1f}%</h3>
-                                <p style="margin: 5px 0 0 0; font-size: 0.9em;">
-                                    {r['score']}/{r['total_questions']} | {r['grade']}
-                                </p>
-                            </div>
-                        </div>
-                        <p style="margin: 10px 0 0 0; font-size: 0.8em; color: #666;">
-                            📅 {r['submitted_at'][:16]}
-                        </p>
-                    </div>
-                    """, unsafe_allow_html=True)
+            except Exception as e:
+                st.error(f"❌ Lỗi: {str(e)}")
     
     # ==================== XUẤT BÁO CÁO ====================
     elif menu == "📥 XUẤT BÁO CÁO":
@@ -1679,17 +1878,12 @@ def main():
                 "📋 Toàn bộ kết quả",
                 "🏫 Kết quả theo lớp",
                 "📝 Kết quả theo Quiz", 
-                "👨‍🎓 Kết quả học sinh",
-                "📊 Thống kê tổng hợp"
+                "👨‍🎓 Kết quả học sinh"
             ]
         )
         
         if report_type == "🏫 Kết quả theo lớp":
-            conn = sqlite3.connect('quiz_system.db')
-            c = conn.cursor()
-            c.execute("SELECT DISTINCT class_name FROM results WHERE class_name != '' ORDER BY class_name")
-            classes = [row[0] for row in c.fetchall()]
-            conn.close()
+            classes = get_distinct_classes()
             
             if classes:
                 selected_classes = st.multiselect("Chọn lớp (có thể chọn nhiều):", classes)
@@ -1764,6 +1958,63 @@ def main():
                             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                             use_container_width=True
                         )
+            else:
+                st.info("📭 Chưa có dữ liệu lớp học")
+        
+        elif report_type == "📝 Kết quả theo Quiz":
+            try:
+                conn = sqlite3.connect('quiz_system.db')
+                c = conn.cursor()
+                c.execute("SELECT DISTINCT quiz_code FROM results ORDER BY quiz_code")
+                quizzes = [row[0] for row in c.fetchall()]
+                conn.close()
+                
+                if quizzes:
+                    selected_quiz = st.selectbox("Chọn Quiz:", quizzes)
+                    
+                    if selected_quiz and st.button("📤 **XUẤT BÁO CÁO QUIZ**", use_container_width=True):
+                        conn = sqlite3.connect('quiz_system.db')
+                        conn.row_factory = sqlite3.Row
+                        c = conn.cursor()
+                        c.execute('SELECT * FROM results WHERE quiz_code = ? ORDER BY percentage DESC', (selected_quiz,))
+                        results = c.fetchall()
+                        conn.close()
+                        
+                        if results:
+                            data = []
+                            for r in results:
+                                data.append({
+                                    "Mã bài": r['id'],
+                                    "Họ tên": r['student_name'],
+                                    "Lớp": r['class_name'],
+                                    "Mã HS": r['student_id'] or "",
+                                    "Mã Quiz": r['quiz_code'],
+                                    "Điểm": r['score'],
+                                    "Tổng câu": r['total_questions'],
+                                    "Tỉ lệ %": r['percentage'],
+                                    "Xếp loại": r['grade'],
+                                    "Thời gian": r['submitted_at']
+                                })
+                            
+                            df = pd.DataFrame(data)
+                            excel_buffer = io.BytesIO()
+                            df.to_excel(excel_buffer, index=False, engine='openpyxl')
+                            excel_buffer.seek(0)
+                            
+                            st.success(f"✅ **ĐÃ XUẤT {len(results)} KẾT QUẢ CỦA QUIZ {selected_quiz}**")
+                            
+                            st.download_button(
+                                label="📥 **TẢI FILE EXCEL**",
+                                data=excel_buffer,
+                                file_name=f"bao_cao_quiz_{selected_quiz}_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx",
+                                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                use_container_width=True
+                            )
+                else:
+                    st.info("📭 Chưa có dữ liệu quiz")
+                    
+            except Exception as e:
+                st.error(f"❌ Lỗi: {str(e)}")
         
         elif st.button("📤 **XUẤT TOÀN BỘ KẾT QUẢ**", use_container_width=True):
             conn = sqlite3.connect('quiz_system.db')
@@ -1804,6 +2055,8 @@ def main():
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                     use_container_width=True
                 )
+            else:
+                st.info("📭 Chưa có dữ liệu để xuất")
 
 if __name__ == "__main__":
     main()
