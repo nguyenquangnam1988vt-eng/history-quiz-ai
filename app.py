@@ -273,12 +273,23 @@ gemini_model = init_ai_model()
 
 # ==================== HÀM HELPER ====================
 def extract_text_from_file(uploaded_file):
-    """Trích xuất text từ file upload"""
+    """Trích xuất text từ file upload - PHIÊN BẢN CẢI TIẾN"""
     file_type = uploaded_file.name.split('.')[-1].lower()
     
     try:
+        # Reset file pointer về đầu
+        uploaded_file.seek(0)
+        
         if file_type == 'txt':
-            return uploaded_file.read().decode('utf-8')
+            content = uploaded_file.read()
+            # Thử decode với UTF-8, nếu lỗi thì thử với ISO-8859-1
+            try:
+                return content.decode('utf-8')
+            except UnicodeDecodeError:
+                try:
+                    return content.decode('utf-8-sig')
+                except:
+                    return content.decode('latin-1', errors='ignore')
         
         elif file_type == 'pdf':
             pdf_reader = PyPDF2.PdfReader(io.BytesIO(uploaded_file.read()))
@@ -290,16 +301,67 @@ def extract_text_from_file(uploaded_file):
             return text
         
         elif file_type == 'docx':
+            # PHẦN QUAN TRỌNG: Đọc DOCX đúng cách
+            import docx
+            
+            # Lưu file tạm thời hoặc đọc từ bytes
             doc = docx.Document(io.BytesIO(uploaded_file.read()))
             text = ""
+            
+            # Đọc tất cả các paragraph
             for paragraph in doc.paragraphs:
                 if paragraph.text.strip():
                     text += paragraph.text + "\n"
+            
+            # Đọc cả text trong tables
+            for table in doc.tables:
+                for row in table.rows:
+                    for cell in row.cells:
+                        if cell.text.strip():
+                            text += cell.text + " "
+                    text += "\n"
+            
+            # Reset file pointer
+            uploaded_file.seek(0)
+            
+            # DEBUG: In độ dài text để kiểm tra
+            print(f"DEBUG: Đã đọc {len(text)} ký tự từ file DOCX")
+            
             return text
         
     except Exception as e:
-        print(f"❌ Lỗi đọc file: {e}")
-        return f"[File: {uploaded_file.name}] - Lỗi đọc nội dung"
+        print(f"❌ Lỗi đọc file {uploaded_file.name}: {e}")
+        
+        # Thử phương pháp dự phòng cho DOCX
+        if file_type == 'docx':
+            try:
+                # Thử đọc như file zip (DOCX thực chất là zip)
+                import zipfile
+                import xml.etree.ElementTree as ET
+                
+                uploaded_file.seek(0)
+                zip_data = io.BytesIO(uploaded_file.read())
+                
+                with zipfile.ZipFile(zip_data) as docx_zip:
+                    # Đọc file document.xml
+                    xml_content = docx_zip.read('word/document.xml')
+                    
+                    # Parse XML đơn giản
+                    root = ET.fromstring(xml_content)
+                    
+                    # Lấy tất cả text
+                    namespaces = {'w': 'http://schemas.openxmlformats.org/wordprocessingml/2006/main'}
+                    text_elements = root.findall('.//w:t', namespaces)
+                    
+                    text = ' '.join([elem.text for elem in text_elements if elem.text])
+                    
+                    print(f"DEBUG (dự phòng): Đã đọc {len(text)} ký tự từ DOCX XML")
+                    return text
+                    
+            except Exception as e2:
+                print(f"❌ Lỗi dự phòng DOCX: {e2}")
+        
+        return f"[File: {uploaded_file.name}] - Lỗi đọc nội dung: {str(e)[:100]}"
 
 def get_sample_questions():
     """Câu hỏi mẫu khi không thể tạo bằng AI"""
