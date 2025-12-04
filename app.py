@@ -167,12 +167,91 @@ def migrate_database():
     conn.commit()
     conn.close()
 
+# ==================== HÀM KIỂM TRA VÀ SỬA DATABASE ====================
+def check_and_fix_database():
+    """Tự động kiểm tra và sửa lỗi database"""
+    try:
+        conn = sqlite3.connect('quiz_system.db')
+        c = conn.cursor()
+        
+        # Kiểm tra bảng quizzes
+        c.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='quizzes'")
+        if not c.fetchone():
+            print("⚠️ Bảng quizzes không tồn tại, đang tạo...")
+            reset_quizzes_table()
+            conn.close()
+            return
+        
+        c.execute("PRAGMA table_info(quizzes)")
+        columns = [col[1] for col in c.fetchall()]
+        
+        required_columns = [
+            'id', 'quiz_code', 'title', 'subject', 'created_at', 
+            'question_count', 'is_active', 'difficulty'
+        ]
+        
+        missing_columns = [col for col in required_columns if col not in columns]
+        
+        if missing_columns:
+            print(f"⚠️ Thiếu cột trong quizzes: {missing_columns}")
+            
+            # Thêm các cột bị thiếu
+            for col in missing_columns:
+                try:
+                    if col == 'difficulty':
+                        c.execute(f"ALTER TABLE quizzes ADD COLUMN {col} TEXT DEFAULT 'medium'")
+                    elif col == 'is_active':
+                        c.execute(f"ALTER TABLE quizzes ADD COLUMN {col} BOOLEAN DEFAULT 1")
+                    elif col == 'question_count':
+                        c.execute(f"ALTER TABLE quizzes ADD COLUMN {col} INTEGER DEFAULT 0")
+                    else:
+                        c.execute(f"ALTER TABLE quizzes ADD COLUMN {col} TEXT DEFAULT ''")
+                    print(f"  ✅ Đã thêm cột {col}")
+                except Exception as e:
+                    print(f"  ❌ Lỗi thêm cột {col}: {e}")
+        
+        conn.commit()
+        conn.close()
+        print("✅ Đã kiểm tra và sửa database")
+        
+    except Exception as e:
+        print(f"❌ Lỗi kiểm tra database: {e}")
+
+# ==================== RESET BẢNG QUIZZES ====================
+def reset_quizzes_table():
+    """Đặt lại bảng quizzes nếu có lỗi cấu trúc"""
+    try:
+        conn = sqlite3.connect('quiz_system.db')
+        c = conn.cursor()
+        
+        # Xóa bảng cũ nếu tồn tại
+        c.execute('DROP TABLE IF EXISTS quizzes')
+        
+        # Tạo bảng mới với đầy đủ cột
+        c.execute('''CREATE TABLE quizzes
+                     (id INTEGER PRIMARY KEY AUTOINCREMENT,
+                      quiz_code TEXT UNIQUE,
+                      title TEXT,
+                      subject TEXT DEFAULT 'Lịch Sử',
+                      created_at TIMESTAMP,
+                      question_count INTEGER,
+                      is_active BOOLEAN DEFAULT 1,
+                      difficulty TEXT DEFAULT 'medium')''')
+        
+        conn.commit()
+        conn.close()
+        print("✅ Đã reset bảng quizzes thành công!")
+        return True
+    except Exception as e:
+        print(f"❌ Lỗi reset bảng: {e}")
+        return False
+
 # ==================== KHỞI TẠO DATABASE ====================
 def init_db():
     conn = sqlite3.connect('quiz_system.db')
     c = conn.cursor()
     
-    # Bảng quizzes
+    # Bảng quizzes - CẬP NHẬT
     c.execute('''CREATE TABLE IF NOT EXISTS quizzes
                  (id INTEGER PRIMARY KEY AUTOINCREMENT,
                   quiz_code TEXT UNIQUE,
@@ -180,7 +259,8 @@ def init_db():
                   subject TEXT DEFAULT 'Lịch Sử',
                   created_at TIMESTAMP,
                   question_count INTEGER,
-                  is_active BOOLEAN DEFAULT 1)''')
+                  is_active BOOLEAN DEFAULT 1,
+                  difficulty TEXT DEFAULT 'medium')''')
     
     # Bảng questions
     c.execute('''CREATE TABLE IF NOT EXISTS questions
@@ -209,10 +289,12 @@ def init_db():
     
     conn.commit()
     conn.close()
+    print("✅ Database đã được khởi tạo/kiểm tra")
 
 # Chạy migration và init
 migrate_database()
 init_db()
+check_and_fix_database()
 
 # ==================== KHỞI TẠO GEMINI AI ====================
 @st.cache_resource
@@ -273,12 +355,23 @@ gemini_model = init_ai_model()
 
 # ==================== HÀM HELPER ====================
 def extract_text_from_file(uploaded_file):
-    """Trích xuất text từ file upload"""
+    """Trích xuất text từ file upload - PHIÊN BẢN CẢI TIẾN"""
     file_type = uploaded_file.name.split('.')[-1].lower()
     
     try:
+        # Reset file pointer về đầu
+        uploaded_file.seek(0)
+        
         if file_type == 'txt':
-            return uploaded_file.read().decode('utf-8')
+            content = uploaded_file.read()
+            # Thử decode với UTF-8, nếu lỗi thì thử với ISO-8859-1
+            try:
+                return content.decode('utf-8')
+            except UnicodeDecodeError:
+                try:
+                    return content.decode('utf-8-sig')
+                except:
+                    return content.decode('latin-1', errors='ignore')
         
         elif file_type == 'pdf':
             pdf_reader = PyPDF2.PdfReader(io.BytesIO(uploaded_file.read()))
@@ -290,16 +383,84 @@ def extract_text_from_file(uploaded_file):
             return text
         
         elif file_type == 'docx':
+            # PHẦN QUAN TRỌNG: Đọc DOCX đúng cách
+            import docx
+            
+            # Lưu file tạm thời hoặc đọc từ bytes
             doc = docx.Document(io.BytesIO(uploaded_file.read()))
             text = ""
+            
+            # Đọc tất cả các paragraph
             for paragraph in doc.paragraphs:
                 if paragraph.text.strip():
                     text += paragraph.text + "\n"
+            
+            # Đọc cả text trong tables
+            for table in doc.tables:
+                for row in table.rows:
+                    for cell in row.cells:
+                        if cell.text.strip():
+                            text += cell.text + " "
+                    text += "\n"
+            
+            # Reset file pointer
+            uploaded_file.seek(0)
+            
+            # DEBUG: In độ dài text để kiểm tra
+            print(f"DEBUG: Đã đọc {len(text)} ký tự từ file DOCX")
+            
             return text
         
     except Exception as e:
-        print(f"❌ Lỗi đọc file: {e}")
-        return f"[File: {uploaded_file.name}] - Lỗi đọc nội dung"
+        print(f"❌ Lỗi đọc file {uploaded_file.name}: {e}")
+        
+        # Thử phương pháp dự phòng cho DOCX
+        if file_type == 'docx':
+            try:
+                # Thử đọc như file zip (DOCX thực chất là zip)
+                import zipfile
+                import xml.etree.ElementTree as ET
+                
+                uploaded_file.seek(0)
+                zip_data = io.BytesIO(uploaded_file.read())
+                
+                with zipfile.ZipFile(zip_data) as docx_zip:
+                    # Đọc file document.xml
+                    xml_content = docx_zip.read('word/document.xml')
+                    
+                    # Parse XML đơn giản
+                    root = ET.fromstring(xml_content)
+                    
+                    # Lấy tất cả text
+                    namespaces = {'w': 'http://schemas.openxmlformats.org/wordprocessingml/2006/main'}
+                    text_elements = root.findall('.//w:t', namespaces)
+                    
+                    text = ' '.join([elem.text for elem in text_elements if elem.text])
+                    
+                    print(f"DEBUG (dự phòng): Đã đọc {len(text)} ký tự từ DOCX XML")
+                    return text
+                    
+            except Exception as e2:
+                print(f"❌ Lỗi dự phòng DOCX: {e2}")
+        
+        return f"[File: {uploaded_file.name}] - Lỗi đọc nội dung: {str(e)[:100]}"
+
+def debug_file_content(uploaded_file):
+    """Debug nội dung file để tìm lỗi"""
+    print(f"=== DEBUG FILE {uploaded_file.name} ===")
+    print(f"Kích thước: {uploaded_file.size} bytes")
+    print(f"Loại file: {uploaded_file.type}")
+    
+    # Đọc raw bytes
+    uploaded_file.seek(0)
+    raw_bytes = uploaded_file.read()
+    print(f"Số bytes: {len(raw_bytes)}")
+    
+    # Hiển thị 200 bytes đầu tiên
+    print(f"200 bytes đầu: {raw_bytes[:200]}")
+    
+    uploaded_file.seek(0)  # Reset
+    return len(raw_bytes)
 
 def get_sample_questions():
     """Câu hỏi mẫu khi không thể tạo bằng AI"""
@@ -559,27 +720,46 @@ def main():
             c = conn.cursor()
             
             c.execute("SELECT COUNT(*) FROM quizzes")
-            quiz_count = c.fetchone()[0]
+            quiz_count = c.fetchone()[0] or 0
             
             c.execute("SELECT COUNT(DISTINCT student_name) FROM results")
-            student_count = c.fetchone()[0]
+            student_count_result = c.fetchone()
+            student_count = student_count_result[0] if student_count_result else 0
             
             c.execute("SELECT COUNT(*) FROM results")
-            test_count = c.fetchone()[0]
+            test_count_result = c.fetchone()
+            test_count = test_count_result[0] if test_count_result else 0
             
             c.execute("SELECT COUNT(DISTINCT class_name) FROM results WHERE class_name != ''")
-            class_count = c.fetchone()[0]
+            class_count_result = c.fetchone()
+            class_count = class_count_result[0] if class_count_result else 0
+            
+            # Lấy quiz mới nhất
+            c.execute("SELECT quiz_code FROM quizzes ORDER BY created_at DESC LIMIT 1")
+            latest_quiz = c.fetchone()
+            latest_quiz_code = latest_quiz[0] if latest_quiz else "Chưa có"
             
             conn.close()
             
-            st.info(f"""
-            **📊 THỐNG KÊ NHANH:**
-            - 📝 **Quiz:** {quiz_count}
-            - 👨‍🎓 **Học sinh:** {student_count}
-            - 🏫 **Lớp học:** {class_count}
-            - 📋 **Bài thi:** {test_count}
-            """)
-        except:
+            if student_count == 0:
+                st.info(f"""
+                **📊 THỐNG KÊ NHANH:**
+                - 📝 **Quiz mới nhất:** {latest_quiz_code}
+                - ⚠️ **Học sinh:** {student_count} (Chưa có ai tham gia)
+                - 🏫 **Lớp học:** {class_count}
+                - 📋 **Bài thi:** {test_count}
+                """)
+                st.warning("Chưa có học sinh tham gia. Hãy chia sẻ mã Quiz!")
+            else:
+                st.info(f"""
+                **📊 THỐNG KÊ NHANH:**
+                - 📝 **Quiz:** {quiz_count}
+                - 👨‍🎓 **Học sinh:** {student_count}
+                - 🏫 **Lớp học:** {class_count}
+                - 📋 **Bài thi:** {test_count}
+                """)
+                
+        except Exception as e:
             st.info("📊 Đang khởi tạo hệ thống...")
         
         st.markdown("---")
@@ -741,10 +921,21 @@ def main():
         
         if uploaded_file and st.button("🚀 TẠO QUIZ BẰNG AI", type="primary", use_container_width=True):
             with st.spinner("🤖 **AI ĐANG TẠO CÂU HỎI...**" if gemini_model else "📝 **ĐANG TẠO QUIZ...**"):
+                # Debug file
+                file_size = debug_file_content(uploaded_file)
+                
                 text = extract_text_from_file(uploaded_file)
                 
+                # Hiển thị thông tin debug
+                st.info(f"**Thông tin file:** {uploaded_file.name} ({file_size} bytes)")
+                st.info(f"**Đã đọc được:** {len(text)} ký tự")
+                
                 if len(text) < 100:
-                    st.error("❌ **FILE QUÁ NGẮN!** Vui lòng upload file có nội dung đầy đủ (ít nhất 100 ký tự).")
+                    st.error(f"❌ **CHỈ ĐỌC ĐƯỢC {len(text)} KÝ TỰ!** Có thể file bị lỗi định dạng.")
+                    
+                    # Hiển thị nội dung đã đọc được
+                    with st.expander("📄 Xem nội dung đã đọc được"):
+                        st.text(text[:500] + "..." if len(text) > 500 else text)
                 else:
                     quiz_data = generate_quiz_questions(text, num_questions)
                     
@@ -755,11 +946,31 @@ def main():
                     conn = sqlite3.connect('quiz_system.db')
                     c = conn.cursor()
                     
-                    # Lưu thông tin quiz
-                    c.execute('''INSERT INTO quizzes (quiz_code, title, subject, created_at, question_count) 
-                                 VALUES (?, ?, ?, ?, ?)''',
-                             (quiz_code, f"{subject} - {quiz_title}", subject, datetime.now(), len(quiz_data['questions'])))
-                    quiz_id = c.lastrowid
+                    # Kiểm tra xem bảng có tồn tại không
+                    c.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='quizzes'")
+                    if not c.fetchone():
+                        # Nếu bảng không tồn tại, tạo lại
+                        reset_quizzes_table()
+                        conn = sqlite3.connect('quiz_system.db')  # Kết nối lại
+                        c = conn.cursor()
+                    
+                    # Lưu thông tin quiz - THÊM CỘT DIFFICULTY
+                    try:
+                        c.execute('''INSERT INTO quizzes 
+                                     (quiz_code, title, subject, created_at, question_count, difficulty) 
+                                     VALUES (?, ?, ?, ?, ?, ?)''',
+                                 (quiz_code, f"{subject} - {quiz_title}", subject, 
+                                  datetime.now(), len(quiz_data['questions']), difficulty))
+                        quiz_id = c.lastrowid
+                    except Exception as e:
+                        # Nếu lỗi, thử với cấu trúc đơn giản hơn
+                        print(f"⚠️ Lỗi INSERT đầy đủ: {e}")
+                        c.execute('''INSERT INTO quizzes 
+                                     (quiz_code, title, subject, created_at, question_count) 
+                                     VALUES (?, ?, ?, ?, ?)''',
+                                 (quiz_code, f"{subject} - {quiz_title}", subject, 
+                                  datetime.now(), len(quiz_data['questions'])))
+                        quiz_id = c.lastrowid
                     
                     # Lưu các câu hỏi
                     for q in quiz_data['questions']:
@@ -1361,19 +1572,24 @@ def main():
                 
                 # Lấy dữ liệu thống kê
                 c.execute("SELECT COUNT(*) as total FROM results")
-                total_tests = c.fetchone()['total']
+                total_tests_result = c.fetchone()
+                total_tests = total_tests_result['total'] if total_tests_result else 0
                 
                 c.execute("SELECT COUNT(DISTINCT student_name) as total FROM results")
-                total_students = c.fetchone()['total']
+                total_students_result = c.fetchone()
+                total_students = total_students_result['total'] if total_students_result else 0
                 
                 c.execute("SELECT COUNT(DISTINCT class_name) as total FROM results WHERE class_name != ''")
-                total_classes = c.fetchone()['total']
+                total_classes_result = c.fetchone()
+                total_classes = total_classes_result['total'] if total_classes_result else 0
                 
                 c.execute("SELECT COUNT(DISTINCT quiz_code) as total FROM results")
-                total_quizzes = c.fetchone()['total']
+                total_quizzes_result = c.fetchone()
+                total_quizzes = total_quizzes_result['total'] if total_quizzes_result else 0
                 
                 c.execute("SELECT AVG(percentage) as avg FROM results")
-                avg_score = c.fetchone()['avg'] or 0
+                avg_score_result = c.fetchone()
+                avg_score = avg_score_result['avg'] if avg_score_result and avg_score_result['avg'] else 0
                 
                 # Hiển thị metrics
                 col1, col2, col3, col4 = st.columns(4)
