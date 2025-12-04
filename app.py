@@ -934,86 +934,118 @@ def main():
             st.info("📭 Đang tải dữ liệu...")
     
     # ==================== TẠO QUIZ MỚI ====================
-    elif menu == "📤 TẠO QUIZ MỚI":
-        st.header("📤 TẠO QUIZ MỚI TỪ GIÁO ÁN")
+elif menu == "📤 TẠO QUIZ MỚI":
+    st.header("📤 TẠO QUIZ MỚI TỪ GIÁO ÁN")
+    
+    col1, col2 = st.columns([2, 1])
+    
+    with col1:
+        uploaded_file = st.file_uploader(
+            "**📁 CHỌN FILE GIÁO ÁN:**",
+            type=['txt', 'pdf', 'docx'],
+            help="Tải lên file giáo án lịch sử (TXT, PDF hoặc DOCX)"
+        )
         
-        col1, col2 = st.columns([2, 1])
-        
-        with col1:
-            uploaded_file = st.file_uploader(
-                "**📁 CHỌN FILE GIÁO ÁN:**",
-                type=['txt', 'pdf', 'docx'],
-                help="Tải lên file giáo án lịch sử (TXT, PDF hoặc DOCX)"
-            )
-            
-            if uploaded_file:
-                with st.expander("👁️ **XEM TRƯỚC NỘI DUNG**", expanded=False):
-                    text = extract_text_from_file(uploaded_file)
-                    if len(text) > 1000:
-                        st.text_area("Nội dung", text[:1000] + "...", height=200, disabled=True)
-                    else:
-                        st.text_area("Nội dung", text, height=200, disabled=True)
-        
-        with col2:
-            num_questions = st.slider(
-                "**SỐ CÂU HỎI:**",
-                min_value=3,
-                max_value=20,
-                value=10,
-                help="Chọn số lượng câu hỏi muốn tạo"
-            )
-            
-            quiz_title = st.text_input(
-                "**TIÊU ĐỀ QUIZ:**",
-                value="Kiểm tra Lịch Sử",
-                help="Đặt tên cho quiz của bạn"
-            )
-            
-            subject = st.selectbox(
-                "**MÔN HỌC:**",
-                ["Lịch Sử", "Địa Lý", "Giáo Dục Công Dân", "Toán", "Ngữ Văn", "Tiếng Anh", "Vật Lý", "Hóa Học", "Sinh Học", "Khác"]
-            )
-            
-            difficulty = st.select_slider(
-                "**ĐỘ KHÓ:**",
-                options=["Dễ", "Trung bình", "Khó"],
-                value="Trung bình"
-            )
-        
-        if uploaded_file and st.button("🚀 TẠO QUIZ BẰNG AI", type="primary", use_container_width=True):
-            with st.spinner("🤖 **AI ĐANG TẠO CÂU HỎI...**" if gemini_model else "📝 **ĐANG TẠO QUIZ...**"):
-                # Debug file
-                file_size = debug_file_content(uploaded_file)
-                
+        if uploaded_file:
+            with st.expander("👁️ **XEM TRƯỚC NỘI DUNG**", expanded=False):
                 text = extract_text_from_file(uploaded_file)
-                
-                # Hiển thị thông tin debug
-                st.info(f"**Thông tin file:** {uploaded_file.name} ({file_size} bytes)")
-                st.info(f"**Đã đọc được:** {len(text)} ký tự")
-                
-                if len(text) < 100:
-                    st.error(f"❌ **CHỈ ĐỌC ĐƯỢC {len(text)} KÝ TỰ!** Có thể file bị lỗi định dạng.")
-                    
-                    # Hiển thị nội dung đã đọc được
-                    with st.expander("📄 Xem nội dung đã đọc được"):
-                        st.text(text[:500] + "..." if len(text) > 500 else text)
+                if len(text) > 1000:
+                    st.text_area("Nội dung", text[:1000] + "...", height=200, disabled=True)
                 else:
-                    quiz_data = generate_quiz_questions(text, num_questions)
-                    
-                    # Tạo mã quiz ngẫu nhiên
-                    quiz_code = ''.join(random.choices(string.ascii_uppercase + string.digits, k=8))
-                    
-                    # Lưu vào database
+                    st.text_area("Nội dung", text, height=200, disabled=True)
+    
+    with col2:
+        num_questions = st.slider(
+            "**SỐ CÂU HỎI:**",
+            min_value=3,
+            max_value=20,
+            value=10,
+            help="Chọn số lượng câu hỏi muốn tạo"
+        )
+        
+        quiz_title = st.text_input(
+            "**TIÊU ĐỀ QUIZ:**",
+            value="Kiểm tra Lịch Sử",
+            help="Đặt tên cho quiz của bạn"
+        )
+        
+        subject = st.selectbox(
+            "**MÔN HỌC:**",
+            ["Lịch Sử", "Địa Lý", "Giáo Dục Công Dân", "Toán", "Ngữ Văn", "Tiếng Anh", "Vật Lý", "Hóa Học", "Sinh Học", "Khác"]
+        )
+        
+        difficulty = st.select_slider(
+            "**ĐỘ KHÓ:**",
+            options=["Dễ", "Trung bình", "Khó"],
+            value="Trung bình"
+        )
+    
+    if uploaded_file and st.button("🚀 TẠO QUIZ BẰNG AI", type="primary", use_container_width=True):
+        with st.spinner("🤖 **AI ĐANG TẠO CÂU HỎI...**" if gemini_model else "📝 **ĐANG TẠO QUIZ...**"):
+            # Debug file
+            file_size = debug_file_content(uploaded_file)
+            
+            text = extract_text_from_file(uploaded_file)
+            
+            # Hiển thị thông tin debug
+            st.info(f"**Thông tin file:** {uploaded_file.name} ({file_size} bytes)")
+            st.info(f"**Đã đọc được:** {len(text)} ký tự")
+            
+            if len(text) < 100:
+                st.error(f"❌ **CHỈ ĐỌC ĐƯỢC {len(text)} KÝ TỰ!** Có thể file bị lỗi định dạng.")
+                
+                # Hiển thị nội dung đã đọc được
+                with st.expander("📄 Xem nội dung đã đọc được"):
+                    st.text(text[:500] + "..." if len(text) > 500 else text)
+            else:
+                quiz_data = generate_quiz_questions(text, num_questions)
+                
+                if not quiz_data or "questions" not in quiz_data:
+                    st.error("❌ **KHÔNG THỂ TẠO CÂU HỎI!** Vui lòng thử lại với file khác.")
+                    st.stop()
+                
+                # Tạo mã quiz ngẫu nhiên
+                quiz_code = ''.join(random.choices(string.ascii_uppercase + string.digits, k=8))
+                
+                # Lưu vào database - THÊM XỬ LÝ LỖI CHI TIẾT
+                conn = None
+                try:
                     conn = sqlite3.connect('quiz_system.db')
                     c = conn.cursor()
+                    
+                    # Tạo bảng nếu chưa tồn tại (đảm bảo chắc chắn)
+                    c.execute('''CREATE TABLE IF NOT EXISTS quizzes
+                                 (id INTEGER PRIMARY KEY AUTOINCREMENT,
+                                  quiz_code TEXT UNIQUE,
+                                  title TEXT,
+                                  subject TEXT DEFAULT 'Lịch Sử',
+                                  created_at TIMESTAMP,
+                                  question_count INTEGER,
+                                  is_active BOOLEAN DEFAULT 1,
+                                  difficulty TEXT DEFAULT 'medium')''')
+                    
+                    c.execute('''CREATE TABLE IF NOT EXISTS questions
+                                 (id INTEGER PRIMARY KEY AUTOINCREMENT,
+                                  quiz_id INTEGER,
+                                  question_text TEXT,
+                                  option_a TEXT,
+                                  option_b TEXT,
+                                  option_c TEXT,
+                                  option_d TEXT,
+                                  correct_answer TEXT,
+                                  explanation TEXT,
+                                  question_type TEXT DEFAULT 'multiple_choice',
+                                  difficulty TEXT DEFAULT 'medium',
+                                  FOREIGN KEY (quiz_id) REFERENCES quizzes(id))''')
+                    
+                    conn.commit()
                     
                     # Kiểm tra xem bảng có tồn tại không
                     c.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='quizzes'")
                     if not c.fetchone():
-                        # Nếu bảng không tồn tại, tạo lại
-                        reset_quizzes_table()
-                        conn = sqlite3.connect('quiz_system.db')  # Kết nối lại
-                        c = conn.cursor()
+                        st.error("❌ **LỖI DATABASE!** Không thể tạo bảng quizzes.")
+                        conn.close()
+                        st.stop()
                     
                     # Lưu thông tin quiz - THÊM CỘT DIFFICULTY
                     try:
@@ -1021,19 +1053,27 @@ def main():
                                      (quiz_code, title, subject, created_at, question_count, difficulty) 
                                      VALUES (?, ?, ?, ?, ?, ?)''',
                                  (quiz_code, f"{subject} - {quiz_title}", subject, 
-                                  datetime.now(), len(quiz_data['questions']), difficulty))
+                                  datetime.now().isoformat(), len(quiz_data['questions']), difficulty))
                         quiz_id = c.lastrowid
                     except Exception as e:
-                        # Nếu lỗi, thử với cấu trúc đơn giản hơn
-                        print(f"⚠️ Lỗi INSERT đầy đủ: {e}")
-                        c.execute('''INSERT INTO quizzes 
-                                     (quiz_code, title, subject, created_at, question_count) 
-                                     VALUES (?, ?, ?, ?, ?)''',
-                                 (quiz_code, f"{subject} - {quiz_title}", subject, 
-                                  datetime.now(), len(quiz_data['questions'])))
-                        quiz_id = c.lastrowid
+                        st.error(f"❌ **LỖI LƯU QUIZ:** {str(e)[:100]}")
+                        # Thử với cấu trúc đơn giản hơn
+                        try:
+                            c.execute('''INSERT INTO quizzes 
+                                         (quiz_code, title, subject, created_at, question_count) 
+                                         VALUES (?, ?, ?, ?, ?)''',
+                                     (quiz_code, f"{subject} - {quiz_title}", subject, 
+                                      datetime.now().isoformat(), len(quiz_data['questions'])))
+                            quiz_id = c.lastrowid
+                        except Exception as e2:
+                            st.error(f"❌ **LỖI NẶNG LƯU QUIZ:** {str(e2)[:100]}")
+                            conn.close()
+                            st.stop()
                     
-                      # Lưu các câu hỏi - VỚI KIỂM TRA LỖI
+                    # Commit sau khi insert quiz
+                    conn.commit()
+                    
+                    # Lưu các câu hỏi - VỚI KIỂM TRA LỖI CHI TIẾT
                     st.write("💾 **Đang lưu câu hỏi vào database...**")
                     
                     success_count = 0
@@ -1049,7 +1089,7 @@ def main():
                             question_progress.progress(progress_percent)
                             
                             # Đảm bảo tất cả trường đều có giá trị
-                            question_text = str(q['question'])[:500] if q.get('question') else f"Câu hỏi {idx+1}"
+                            question_text = str(q.get('question', f"Câu hỏi {idx+1}"))[:500]
                             
                             # Xử lý options
                             options = q.get('options', {})
@@ -1059,16 +1099,12 @@ def main():
                             option_d = str(options.get('D', 'Đáp án D'))[:200]
                             
                             # Xử lý đáp án đúng
-                            correct_answer = str(q.get('correct_answer', 'A'))[:1].upper()
+                            correct_answer = str(q.get('correct_answer', 'A')).upper()[:1]
                             if correct_answer not in ['A', 'B', 'C', 'D']:
                                 correct_answer = 'A'
                             
                             # Xử lý giải thích
                             explanation = str(q.get('explanation', 'Không có giải thích'))[:500]
-                            
-                            # Debug: In thông tin câu hỏi
-                            print(f"DEBUG: Câu {idx+1}: {question_text[:50]}...")
-                            print(f"DEBUG: Đáp án: {correct_answer}")
                             
                             # Thực hiện INSERT
                             c.execute('''INSERT INTO questions 
@@ -1088,43 +1124,34 @@ def main():
                             
                         except Exception as e:
                             error_count += 1
-                            print(f"❌ Lỗi lưu câu hỏi {idx+1}: {e}")
-                            
-                            # Thử lưu với cấu trúc đơn giản hơn (chỉ các cột cơ bản)
-                            try:
-                                c.execute('''INSERT INTO questions 
-                                             (quiz_id, question_text, option_a, option_b, option_c, option_d, correct_answer)
-                                             VALUES (?, ?, ?, ?, ?, ?, ?)''',
-                                         (quiz_id, 
-                                          question_text[:200],
-                                          "Đáp án A", "Đáp án B", "Đáp án C", "Đáp án D",
-                                          'A'))
-                                success_count += 1
-                                print(f"✅ Đã lưu câu hỏi {idx+1} (phiên bản đơn giản)")
-                            except Exception as e2:
-                                print(f"❌ Lỗi nặng câu hỏi {idx+1}: {e2}")
+                            st.error(f"❌ Lỗi câu hỏi {idx+1}: {str(e)[:100]}")
                     
                     question_progress.progress(1.0)
-                    print(f"📊 Kết quả lưu câu hỏi: {success_count} thành công, {error_count} lỗi")
                     
+                    # Commit tất cả câu hỏi
                     conn.commit()
                     
                     # Cập nhật số câu hỏi thực tế đã lưu
                     if success_count > 0:
-                        c.execute('UPDATE quizzes SET question_count = ? WHERE id = ?', (success_count, quiz_id))
-                        conn.commit()
-                        print(f"✅ Đã cập nhật số câu hỏi: {success_count}")
+                        try:
+                            c.execute('UPDATE quizzes SET question_count = ? WHERE id = ?', (success_count, quiz_id))
+                            conn.commit()
+                            st.success(f"✅ **ĐÃ LƯU THÀNH CÔNG {success_count} CÂU HỎI**")
+                        except Exception as e:
+                            st.warning(f"⚠️ Đã lưu câu hỏi nhưng không cập nhật được số lượng: {str(e)[:100]}")
                     else:
                         # Nếu không lưu được câu hỏi nào, xóa quiz đã tạo
                         c.execute('DELETE FROM quizzes WHERE id = ?', (quiz_id,))
                         conn.commit()
-                        print("⚠️ Đã xóa quiz vì không lưu được câu hỏi")
+                        st.error("❌ **KHÔNG THỂ LƯU CÂU HỎI!** Quiz đã bị hủy.")
+                        conn.close()
+                        st.stop()
                     
+                    # Đóng kết nối database
                     conn.close()
                     
-                    # Hiển thị thông báo kết quả
+                    # HIỂN THỊ KẾT QUẢ
                     if success_count > 0:
-                        # Hiển thị kết quả
                         st.success(f"🎉 **QUIZ ĐÃ ĐƯỢC TẠO THÀNH CÔNG! ({success_count}/{len(quiz_data['questions'])} câu)**")
                         
                         col_code, col_info = st.columns(2)
@@ -1152,82 +1179,48 @@ def main():
                         st.code(quiz_code, language="text")
                         
                         # Nút copy
-                        if st.button("📋 Sao chép mã quiz"):
+                        if st.button("📋 Sao chép mã quiz", key="copy_quiz_code"):
                             st.info(f"✅ Đã sao chép mã: {quiz_code}")
                         
                         # Hiển thị cảnh báo nếu có lỗi
                         if error_count > 0:
-                            st.warning(f"⚠️ Có {error_count} câu hỏi không lưu được. Vui lòng kiểm tra database!")
+                            st.warning(f"⚠️ Có {error_count} câu hỏi không lưu được. Vui lòng kiểm tra lại!")
                         
                         # Xem trước câu hỏi
                         with st.expander("📝 **XEM TRƯỚC CÂU HỎI**", expanded=False):
-                            for i, q in enumerate(quiz_data['questions']):
-                                st.markdown(f"### ❓ **Câu {i+1}:** {q['question']}")
+                            for i, q in enumerate(quiz_data['questions'][:5]):  # Chỉ hiển thị 5 câu đầu
+                                st.markdown(f"### ❓ **Câu {i+1}:** {q.get('question', 'Không có câu hỏi')}")
                                 
                                 cols = st.columns(2)
                                 with cols[0]:
-                                    st.markdown(f"**A.** {q['options']['A']}")
-                                    st.markdown(f"**B.** {q['options']['B']}")
+                                    st.markdown(f"**A.** {q.get('options', {}).get('A', 'Đáp án A')}")
+                                    st.markdown(f"**B.** {q.get('options', {}).get('B', 'Đáp án B')}")
                                 with cols[1]:
-                                    st.markdown(f"**C.** {q['options']['C']}")
-                                    st.markdown(f"**D.** {q['options']['D']}")
+                                    st.markdown(f"**C.** {q.get('options', {}).get('C', 'Đáp án C')}")
+                                    st.markdown(f"**D.** {q.get('options', {}).get('D', 'Đáp án D')}")
                                 
-                                st.markdown(f"✅ **Đáp án đúng:** {q['correct_answer']}")
+                                st.markdown(f"✅ **Đáp án đúng:** {q.get('correct_answer', 'A')}")
                                 st.markdown(f"💡 **Giải thích:** {q.get('explanation', 'Không có giải thích')}")
                                 st.markdown("---")
-                    else:
-                        st.error("❌ **KHÔNG THỂ LƯU QUIZ!** Vui lòng kiểm tra database.")
-                    
-                    conn.commit()
-                    conn.close()
-                    
-                    # Hiển thị kết quả
-                    st.success("🎉 **QUIZ ĐÃ ĐƯỢC TẠO THÀNH CÔNG!**")
-                    
-                    col_code, col_info = st.columns(2)
-                    with col_code:
-                        st.markdown(f"""
-                        <div class="student-info-card">
-                            <h3>📋 THÔNG TIN QUIZ</h3>
-                            <p><strong>🏷️ Tiêu đề:</strong> {quiz_title}</p>
-                            <p><strong>📚 Môn học:</strong> {subject}</p>
-                            <p><strong>📊 Độ khó:</strong> {difficulty}</p>
-                            <p><strong>🔢 Số câu:</strong> {len(quiz_data['questions'])}</p>
-                        </div>
-                        """, unsafe_allow_html=True)
-                    
-                    with col_info:
-                        st.markdown(f"""
-                        <div class="student-info-card">
-                            <h3>🎯 MÃ QUIZ</h3>
-                            <h1 style="text-align: center; color: #3B82F6;">{quiz_code}</h1>
-                            <p style="text-align: center; font-size: 0.9em;">Chia sẻ mã này cho học sinh</p>
-                        </div>
-                        """, unsafe_allow_html=True)
-                    
-                    # Hiển thị mã quiz lớn để copy
-                    st.code(quiz_code, language="text")
-                    
-                    # Nút copy
-                    if st.button("📋 Sao chép mã quiz"):
-                        st.info(f"✅ Đã sao chép mã: {quiz_code}")
-                    
-                    # Xem trước câu hỏi
-                    with st.expander("📝 **XEM TRƯỚC CÂU HỎI**", expanded=False):
-                        for i, q in enumerate(quiz_data['questions']):
-                            st.markdown(f"### ❓ **Câu {i+1}:** {q['question']}")
                             
-                            cols = st.columns(2)
-                            with cols[0]:
-                                st.markdown(f"**A.** {q['options']['A']}")
-                                st.markdown(f"**B.** {q['options']['B']}")
-                            with cols[1]:
-                                st.markdown(f"**C.** {q['options']['C']}")
-                                st.markdown(f"**D.** {q['options']['D']}")
-                            
-                            st.markdown(f"✅ **Đáp án đúng:** {q['correct_answer']}")
-                            st.markdown(f"💡 **Giải thích:** {q.get('explanation', 'Không có giải thích')}")
-                            st.markdown("---")
+                            if len(quiz_data['questions']) > 5:
+                                st.info(f"... và {len(quiz_data['questions']) - 5} câu hỏi khác")
+                    
+                except sqlite3.Error as e:
+                    if conn:
+                        conn.rollback()
+                        conn.close()
+                    st.error(f"❌ **LỖI DATABASE NGHIÊM TRỌNG:** {str(e)[:200]}")
+                    st.info("💡 **Gợi ý khắc phục:**")
+                    st.markdown("""
+                    1. **Reset database:** Vào trang chủ để kiểm tra lại
+                    2. **Kiểm tra quyền ghi:** Đảm bảo app có quyền ghi database
+                    3. **Dùng database mới:** Thử xóa file quiz_system.db để tạo lại
+                    """)
+                except Exception as e:
+                    if conn:
+                        conn.close()
+                    st.error(f"❌ **LỖI KHÔNG XÁC ĐỊNH:** {str(e)[:200]}")
     
     # ==================== THAM GIA QUIZ ====================
     elif menu == "🎯 THAM GIA QUIZ":
