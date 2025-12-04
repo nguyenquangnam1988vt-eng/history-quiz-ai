@@ -1,0 +1,14 @@
+name: Keep App Alive
+on:
+  schedule:
+    - cron: '*/10 * * * *'  # Chạy mỗi 10 phút
+  workflow_dispatch:
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping Streamlit App
+        run: |
+          curl -s https://${{ secrets.STREAMLIT_APP_URL }} > /dev/null
+          echo "App pinged successfully!"
