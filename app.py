@@ -377,7 +377,7 @@ def init_ai_model():
         
         # 3. Từ key trực tiếp
         if not api_key:
-            api_key = ""
+            api_key = "AIzaSyAXneM58drczCgMfm-Ihx0mzxIpiy8TmvQ"
         
         if not api_key or api_key == "your_api_key_here":
             st.warning("⚠️ Chưa cấu hình Gemini API Key")
