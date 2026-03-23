@@ -102,6 +102,30 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
+# ==================== ĐĂNG NHẬP ADMIN ====================
+if 'logged_in' not in st.session_state:
+    st.session_state.logged_in = False
+
+def login_admin():
+    """Hiển thị form đăng nhập admin trên sidebar"""
+    st.sidebar.markdown("---")
+    if not st.session_state.logged_in:
+        with st.sidebar:
+            st.subheader("👨‍🏫 ĐĂNG NHẬP GIÁO VIÊN")
+            admin_user = st.text_input("Tài khoản", key="admin_user")
+            admin_pass = st.text_input("Mật khẩu", type="password", key="admin_pass")
+            if st.button("Đăng nhập", use_container_width=True):
+                if admin_user == "admin" and admin_pass == "duyen123":
+                    st.session_state.logged_in = True
+                    st.rerun()
+                else:
+                    st.error("Sai tài khoản hoặc mật khẩu!")
+    else:
+        st.sidebar.success("✅ Đã đăng nhập với quyền Giáo viên")
+        if st.sidebar.button("Đăng xuất", use_container_width=True):
+            st.session_state.logged_in = False
+            st.rerun()
+
 # ==================== DATABASE MIGRATION ====================
 def migrate_database():
     """Cập nhật cấu trúc database khi có thay đổi"""
@@ -167,7 +191,6 @@ def migrate_database():
     conn.commit()
     conn.close()
 
-# ==================== HÀM KIỂM TRA VÀ SỬA DATABASE ====================
 def check_and_fix_database():
     """Tự động kiểm tra và sửa lỗi database"""
     try:
@@ -216,6 +239,7 @@ def check_and_fix_database():
         
     except Exception as e:
         print(f"❌ Lỗi kiểm tra database: {e}")
+
 def check_and_fix_questions_table():
     """Tự động kiểm tra và sửa lỗi bảng questions"""
     try:
@@ -304,6 +328,29 @@ def reset_questions_table():
         return True
     except Exception as e:
         print(f"❌ Lỗi reset bảng questions: {e}")
+        return False
+
+def reset_quizzes_table():
+    """Đặt lại bảng quizzes nếu cần"""
+    try:
+        conn = sqlite3.connect('quiz_system.db')
+        c = conn.cursor()
+        c.execute('DROP TABLE IF EXISTS quizzes')
+        c.execute('''CREATE TABLE quizzes
+                     (id INTEGER PRIMARY KEY AUTOINCREMENT,
+                      quiz_code TEXT UNIQUE,
+                      title TEXT,
+                      subject TEXT DEFAULT 'Lịch Sử',
+                      created_at TIMESTAMP,
+                      question_count INTEGER,
+                      is_active BOOLEAN DEFAULT 1,
+                      difficulty TEXT DEFAULT 'medium')''')
+        conn.commit()
+        conn.close()
+        print("✅ Đã reset bảng quizzes thành công!")
+        return True
+    except Exception as e:
+        print(f"❌ Lỗi reset bảng quizzes: {e}")
         return False
 
 # ==================== KHỞI TẠO DATABASE ====================
@@ -742,7 +789,7 @@ def get_students_by_class(class_name):
     except:
         return []
 
-# ==================== GIAO DIỆN CHÍNH HOÀN CHỈNH ====================
+# ==================== GIAO DIỆN CHÍNH ====================
 def main():
     st.markdown('<h1 class="main-header">📚 HỆ THỐNG QUIZ LỊCH SỬ - QUẢN LÝ LỚP HỌC</h1>', unsafe_allow_html=True)
     
@@ -751,6 +798,7 @@ def main():
         st.image("https://cdn-icons-png.flaticon.com/512/2237/2237288.png", width=100)
         st.title("🎮 MENU CHÍNH")
         
+        # Các menu chính (luôn hiển thị)
         menu_options = [
             "🏠 TRANG CHỦ",
             "📤 TẠO QUIZ MỚI",
@@ -760,6 +808,10 @@ def main():
             "🏆 BẢNG XẾP HẠNG",
             "📥 XUẤT BÁO CÁO"
         ]
+        
+        # Nếu đã đăng nhập admin, thêm menu quản lý
+        if st.session_state.logged_in:
+            menu_options.append("🔧 QUẢN LÝ QUIZ")
         
         menu = st.radio("CHỌN CHỨC NĂNG:", menu_options)
         
@@ -825,6 +877,9 @@ def main():
         
         st.markdown("---")
         st.caption("© 2024 Hệ thống Quiz Lịch Sử")
+    
+    # Gọi form đăng nhập admin (hiển thị ở sidebar)
+    login_admin()
     
     # ==================== TRANG CHỦ ====================
     if menu == "🏠 TRANG CHỦ":
@@ -1007,7 +1062,7 @@ def main():
                     # Tạo mã quiz ngẫu nhiên
                     quiz_code = ''.join(random.choices(string.ascii_uppercase + string.digits, k=8))
                     
-                    # Lưu vào database - THÊM XỬ LÝ LỖI CHI TIẾT
+                    # Lưu vào database
                     conn = None
                     try:
                         conn = sqlite3.connect('quiz_system.db')
@@ -1047,7 +1102,7 @@ def main():
                             conn.close()
                             st.stop()
                         
-                        # Lưu thông tin quiz - THÊM CỘT DIFFICULTY
+                        # Lưu thông tin quiz
                         try:
                             c.execute('''INSERT INTO quizzes 
                                          (quiz_code, title, subject, created_at, question_count, difficulty) 
@@ -1073,7 +1128,7 @@ def main():
                         # Commit sau khi insert quiz
                         conn.commit()
                         
-                        # Lưu các câu hỏi - VỚI KIỂM TRA LỖI CHI TIẾT
+                        # Lưu các câu hỏi
                         st.write("💾 **Đang lưu câu hỏi vào database...**")
                         
                         success_count = 0
@@ -2266,6 +2321,86 @@ def main():
                     
             except Exception as e:
                 st.error(f"❌ Lỗi: {str(e)}")
+    
+    # ==================== QUẢN LÝ QUIZ (CHỈ ADMIN) ====================
+    elif menu == "🔧 QUẢN LÝ QUIZ":
+        if not st.session_state.logged_in:
+            st.error("Bạn cần đăng nhập với quyền giáo viên để sử dụng tính năng này.")
+            st.stop()
+        
+        st.header("🔧 QUẢN LÝ QUIZ (CHỈ GIÁO VIÊN)")
+        
+        # Lấy danh sách quiz
+        conn = sqlite3.connect('quiz_system.db')
+        conn.row_factory = sqlite3.Row
+        c = conn.cursor()
+        c.execute("SELECT id, quiz_code, title, subject, question_count, created_at FROM quizzes ORDER BY created_at DESC")
+        quizzes = c.fetchall()
+        conn.close()
+        
+        if not quizzes:
+            st.info("Chưa có quiz nào được tạo.")
+        else:
+            # Hiển thị danh sách quiz
+            quiz_options = {f"{q['quiz_code']} - {q['title']} ({q['subject']})": q['id'] for q in quizzes}
+            selected_quiz_label = st.selectbox("Chọn quiz để sửa:", list(quiz_options.keys()))
+            selected_quiz_id = quiz_options[selected_quiz_label]
+            
+            # Lấy câu hỏi của quiz
+            conn = sqlite3.connect('quiz_system.db')
+            conn.row_factory = sqlite3.Row
+            c = conn.cursor()
+            c.execute("SELECT * FROM questions WHERE quiz_id = ? ORDER BY id", (selected_quiz_id,))
+            questions = c.fetchall()
+            conn.close()
+            
+            if not questions:
+                st.warning("Quiz này chưa có câu hỏi.")
+            else:
+                st.subheader(f"✏️ Sửa câu hỏi cho quiz: {selected_quiz_label}")
+                
+                # Tạo form để sửa từng câu
+                with st.form("edit_questions_form"):
+                    updated_questions = []
+                    for idx, q in enumerate(questions):
+                        st.markdown(f"#### Câu {idx+1}")
+                        # Sử dụng st.session_state để lưu giá trị hiện tại
+                        question_text = st.text_area("Nội dung câu hỏi", value=q['question_text'], key=f"q_{q['id']}_text")
+                        col1, col2 = st.columns(2)
+                        with col1:
+                            opt_a = st.text_input("Đáp án A", value=q['option_a'], key=f"q_{q['id']}_a")
+                            opt_c = st.text_input("Đáp án C", value=q['option_c'], key=f"q_{q['id']}_c")
+                        with col2:
+                            opt_b = st.text_input("Đáp án B", value=q['option_b'], key=f"q_{q['id']}_b")
+                            opt_d = st.text_input("Đáp án D", value=q['option_d'], key=f"q_{q['id']}_d")
+                        correct = st.selectbox("Đáp án đúng", options=["A", "B", "C", "D"], index=["A","B","C","D"].index(q['correct_answer']), key=f"q_{q['id']}_correct")
+                        explanation = st.text_area("Giải thích", value=q['explanation'], key=f"q_{q['id']}_expl")
+                        st.markdown("---")
+                        updated_questions.append({
+                            'id': q['id'],
+                            'question_text': question_text,
+                            'option_a': opt_a,
+                            'option_b': opt_b,
+                            'option_c': opt_c,
+                            'option_d': opt_d,
+                            'correct_answer': correct,
+                            'explanation': explanation
+                        })
+                    
+                    submitted = st.form_submit_button("💾 LƯU THAY ĐỔI")
+                    if submitted:
+                        conn = sqlite3.connect('quiz_system.db')
+                        c = conn.cursor()
+                        for q_updated in updated_questions:
+                            c.execute('''
+                                UPDATE questions 
+                                SET question_text=?, option_a=?, option_b=?, option_c=?, option_d=?, correct_answer=?, explanation=?
+                                WHERE id=?
+                            ''', (q_updated['question_text'], q_updated['option_a'], q_updated['option_b'], q_updated['option_c'], q_updated['option_d'], q_updated['correct_answer'], q_updated['explanation'], q_updated['id']))
+                        conn.commit()
+                        conn.close()
+                        st.success("Đã cập nhật câu hỏi thành công!")
+                        st.rerun()
     
     # ==================== XUẤT BÁO CÁO ====================
     elif menu == "📥 XUẤT BÁO CÁO":
