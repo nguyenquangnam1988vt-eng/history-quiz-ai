@@ -434,7 +434,7 @@ def init_ai_model():
         genai.configure(api_key=api_key)
         
         # DÙNG MODEL GEMMA 3-4B
-        model_name = 'models/gemma-3-4b-it'
+        model_name = 'gemini-1.5-flash'
         
         print(f"🤖 Đang khởi tạo model: {model_name}")
         
