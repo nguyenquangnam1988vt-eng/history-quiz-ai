@@ -6,4 +6,4 @@ cryptography>=41.0.0
 pillow>=10.0.0
 pandas>=2.0.0
 plotly>=5.0.0
-google-genes 1.70.0
+google-genes==1.70.0
