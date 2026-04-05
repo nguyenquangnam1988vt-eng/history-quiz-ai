@@ -8,7 +8,7 @@ from datetime import datetime
 import io
 import docx
 import PyPDF2
-import google.generativeai as genai
+from google import genai
 import os
 import pandas as pd
 
